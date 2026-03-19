@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>🚀 Workspace 门禁</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;background:linear-gradient(135deg,#1a73e8 0%,#0d47a1 100%);min-height:100vh;display:flex;align-items:center;justify-content:center}
+.login-container{width:100%;max-width:380px;padding:20px}
+.card{background:#fff;border-radius:16px;box-shadow:0 8px 32px rgba(0,0,0,.2);padding:32px;animation:slideUp .4s ease-out}
+@keyframes slideUp{from{opacity:0;transform:translateY(20px)}to{opacity:1;transform:translateY(0)}}
+.logo{text-align:center;font-size:48px;margin-bottom:16px}
+.title{text-align:center;font-size:24px;font-weight:600;color:#202124;margin-bottom:8px}
+.subtitle{text-align:center;font-size:14px;color:#5f6368;margin-bottom:24px}
+.form-group{margin-bottom:16px}
+label{display:block;font-size:13px;font-weight:500;color:#202124;margin-bottom:6px}
+input[type="text"],input[type="password"]{width:100%;padding:10px 12px;border:1px solid #dadce0;border-radius:8px;font-size:14px;transition:all .2s;font-family:inherit}
+input[type="text"]:focus,input[type="password"]:focus{outline:none;border-color:#1a73e8;box-shadow:0 0 0 3px rgba(26,115,232,.1)}
+.checkbox-group{display:flex;align-items:center;gap:8px;margin-bottom:24px}
+input[type="checkbox"]{width:16px;height:16px;border:1px solid #dadce0;border-radius:4px;cursor:pointer}
+.checkbox-label{font-size:13px;color:#5f6368;cursor:pointer;user-select:none}
+.btn-login{width:100%;padding:10px;background:linear-gradient(135deg,#1a73e8,#1558b0);color:#fff;border:none;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer;transition:all .2s;box-shadow:0 2px 8px rgba(26,115,232,.3)}
+.btn-login:hover{transform:translateY(-2px);box-shadow:0 4px 16px rgba(26,115,232,.4)}
+.btn-login:active{transform:translateY(0)}
+.footer{text-align:center;font-size:12px;color:#9aa0a6;margin-top:16px}
+.error-msg{color:#d32f2f;background:#ffebee;padding:12px;border-radius:6px;margin-bottom:16px;text-align:center;font-size:14px}
+</style>
+</head>
+<body>
+<div class="login-container">
+<div class="card">
+<div class="logo">🚀</div>
+<div class="title">Workspace</div>
+<div class="subtitle">安全访问工作区</div>
+<form method="POST" id="loginForm">
+<div class="form-group">
+<label for="username">用户名</label>
+<input type="text" id="username" name="username" placeholder="su600" required autofocus>
+</div>
+<div class="form-group">
+<label for="password">密码</label>
+<input type="password" id="password" name="password" placeholder="•••••••••" required>
+</div>
+<div class="checkbox-group">
+<input type="checkbox" id="remember" name="remember">
+<label for="remember" class="checkbox-label">记住我（30天）</label>
+</div>
+<button type="submit" class="btn-login">登 录</button>
+</form>
+<div class="footer">🔒 您的凭证已加密传输</div>
+</div>
+</div>
+<script>
+// 页面加载时恢复记住的用户名
+document.addEventListener('DOMContentLoaded', function() {
+  const saved = localStorage.getItem('workspace_user');
+  if (saved) {
+    document.getElementById('username').value = saved;
+    document.getElementById('remember').checked = true;
+    document.getElementById('password').focus();
+  }
+});
+
+// 登录前保存用户名
+document.getElementById('loginForm').addEventListener('submit', function() {
+  if (document.getElementById('remember').checked) {
+    localStorage.setItem('workspace_user', document.getElementById('username').value);
+  } else {
+    localStorage.removeItem('workspace_user');
+  }
+});
+</script>
+</body>
+</html>
