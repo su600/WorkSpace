@@ -210,10 +210,24 @@ func loginHandler(w http.ResponseWriter, r *http.Request) {
 	})
 
 	next := r.URL.Query().Get("next")
-	if next == "" || !strings.HasPrefix(next, "/") {
+	if !isSafeRedirect(next) {
 		next = "/"
 	}
 	http.Redirect(w, r, next, http.StatusSeeOther)
+}
+
+// isSafeRedirect returns true only for relative paths that stay on the same origin.
+// It rejects empty strings, scheme-relative URLs like "//evil.com", and any URL
+// with a non-empty scheme or host (e.g. "https://evil.com").
+func isSafeRedirect(next string) bool {
+	if next == "" || !strings.HasPrefix(next, "/") || strings.HasPrefix(next, "//") {
+		return false
+	}
+	parsed, err := url.Parse(next)
+	if err != nil {
+		return false
+	}
+	return parsed.Scheme == "" && parsed.Host == ""
 }
 
 // isUnder reports whether child is rooted under parent (both must be absolute, cleaned paths).
@@ -246,9 +260,11 @@ func handler(w http.ResponseWriter, r *http.Request) {
 			Name:     "workspace_session",
 			Value:    "",
 			Path:     "/",
+			Expires:  time.Unix(0, 0),
 			MaxAge:   -1,
 			HttpOnly: true,
 			Secure:   cfgSecureCookie,
+			SameSite: http.SameSiteLaxMode,
 		})
 		http.Redirect(w, r, "/login", http.StatusSeeOther)
 		return
