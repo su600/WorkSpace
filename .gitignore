@@ -1,0 +1,6 @@
+# Build output
+workspace-portal
+workspace-portal.exe
+
+# Go test cache
+*.test
