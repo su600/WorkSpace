@@ -7,7 +7,7 @@ OpenClaw 工作目录 Web 文件浏览器 — 用 Go 重写，更快、更可靠
 - 📁 文件目录浏览，支持按名称 / 大小 / 修改时间排序
 - 📝 Markdown 渲染（基于 [goldmark](https://github.com/yuin/goldmark)，支持 GFM 表格、任务列表、脚注等）
 - 📥 文件下载
-- 🔒 HTTP Basic 认证
+- 🔒 自定义登录页面，基于安全会话 Cookie 认证
 - 📱 响应式布局，完美适配手机访问
 - 🚀 单二进制文件部署，无外部依赖
 
@@ -34,8 +34,9 @@ PORTAL_PASS=yourpassword \
 |------|--------|------|
 | `PORTAL_DIR` | `/root/.openclaw/workspace` | 挂载的工作目录路径 |
 | `PORTAL_PORT` | `3000` | 监听端口 |
-| `PORTAL_USER` | `su600` | Basic Auth 用户名 |
-| `PORTAL_PASS` | `password123` | Basic Auth 密码 |
+| `PORTAL_USER` | `su600` | 登录用户名 |
+| `PORTAL_PASS` | `password123` | 登录密码 |
+| `PORTAL_TLS` | `false` | 设为 `true` 启用 Cookie Secure 属性（部署在 HTTPS 后端时使用） |
 
 ## 截图
 
