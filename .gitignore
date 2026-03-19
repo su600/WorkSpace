@@ -1,0 +1,20 @@
+# Build output
+WorkSpace
+workspace-server
+
+# Go build cache
+*.test
+*.out
+
+# IDE files
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Temp files
+/tmp/

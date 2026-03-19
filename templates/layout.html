@@ -1,0 +1,49 @@
+{{define "header"}}<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{{.Title}} — WorkSpace</title>
+  <link rel="stylesheet" href="/static/css/style.css">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🗂️</text></svg>">
+</head>
+<body>
+  <header class="site-header">
+    <div class="header-inner">
+      <a href="/" class="logo">
+        <span class="logo-icon">🗂️</span>
+        <span class="logo-text">WorkSpace</span>
+      </a>
+      <button class="theme-toggle" id="themeToggle" title="Toggle dark/light mode" aria-label="Toggle theme">🌙</button>
+    </div>
+  </header>
+
+  <nav class="breadcrumb" aria-label="breadcrumb">
+    <div class="breadcrumb-inner">
+      {{range $i, $b := .Breadcrumbs}}
+        {{if last $.Breadcrumbs $i}}
+          <span class="crumb crumb-active">{{$b.Name}}</span>
+        {{else}}
+          <a class="crumb" href="{{$b.Path}}">{{$b.Name}}</a>
+          <span class="crumb-sep">/</span>
+        {{end}}
+      {{end}}
+    </div>
+  </nav>
+
+  <main class="main-content">
+{{end}}
+
+{{define "footer"}}
+  </main>
+
+  <footer class="site-footer">
+    <div class="footer-inner">
+      <span>WorkSpace — OpenClaw 文件浏览器</span>
+    </div>
+  </footer>
+
+  <script src="/static/js/app.js"></script>
+</body>
+</html>
+{{end}}

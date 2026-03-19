@@ -1,0 +1,75 @@
+{{define "dir.html"}}
+{{template "header" .}}
+<div class="dir-view">
+  <div class="dir-header">
+    <h1 class="dir-title">
+      <span class="dir-title-icon">📁</span>
+      <span class="dir-title-text">{{.CurrentPath}}</span>
+    </h1>
+    <div class="dir-stats">
+      <span class="stat-badge">📁 {{len .Dirs}}</span>
+      <span class="stat-badge">📄 {{len .Files}}</span>
+    </div>
+  </div>
+
+  {{if and (not .Dirs) (not .Files)}}
+    <div class="empty-state">
+      <div class="empty-icon">📭</div>
+      <p>此目录为空</p>
+    </div>
+  {{else}}
+    <div class="file-table-wrap">
+      <table class="file-table">
+        <thead>
+          <tr>
+            <th class="col-name">名称</th>
+            <th class="col-size">大小</th>
+            <th class="col-date">修改时间</th>
+          </tr>
+        </thead>
+        <tbody>
+          {{if ne .CurrentPath "/"}}
+          <tr class="file-row dir-row">
+            <td class="col-name">
+              <a href=".." class="file-link">
+                <span class="file-icon">⬆️</span>
+                <span class="file-name">..</span>
+              </a>
+            </td>
+            <td class="col-size">—</td>
+            <td class="col-date">—</td>
+          </tr>
+          {{end}}
+
+          {{range .Dirs}}
+          <tr class="file-row dir-row">
+            <td class="col-name">
+              <a href="{{.Path}}" class="file-link">
+                <span class="file-icon">{{.Icon}}</span>
+                <span class="file-name">{{.Name}}</span>
+              </a>
+            </td>
+            <td class="col-size">—</td>
+            <td class="col-date">{{formatTime .ModTime}}</td>
+          </tr>
+          {{end}}
+
+          {{range .Files}}
+          <tr class="file-row">
+            <td class="col-name">
+              <a href="{{.Path}}" class="file-link">
+                <span class="file-icon">{{.Icon}}</span>
+                <span class="file-name">{{.Name}}</span>
+              </a>
+            </td>
+            <td class="col-size">{{sizeStr .Size}}</td>
+            <td class="col-date">{{formatTime .ModTime}}</td>
+          </tr>
+          {{end}}
+        </tbody>
+      </table>
+    </div>
+  {{end}}
+</div>
+{{template "footer" .}}
+{{end}}
