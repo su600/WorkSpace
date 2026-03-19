@@ -2,7 +2,10 @@ package main
 
 import (
 	"bytes"
+	"crypto/rand"
 	"crypto/subtle"
+	_ "embed"
+	"encoding/base64"
 	"fmt"
 	"html"
 	"log"
@@ -14,6 +17,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/yuin/goldmark"
@@ -21,13 +25,70 @@ import (
 	"github.com/yuin/goldmark/parser"
 )
 
+//go:embed login.html
+var loginHTML string
+
 // Configuration — all values can be overridden via environment variables.
 var (
-	cfgPort      string
-	cfgDirectory string
-	cfgUsername  string
-	cfgPassword  string
+	cfgPort         string
+	cfgDirectory    string
+	cfgUsername     string
+	cfgPassword     string
+	cfgSecureCookie bool // set PORTAL_TLS=true when served over HTTPS
 )
+
+// Session management — in-memory token store.
+var (
+	sessionMu sync.RWMutex
+	sessions  = make(map[string]time.Time) // token → expiry
+)
+
+const (
+	sessionDuration       = 24 * time.Hour
+	sessionDurationLong   = 30 * 24 * time.Hour
+)
+
+func generateToken() string {
+	b := make([]byte, 32)
+	if _, err := rand.Read(b); err != nil {
+		log.Fatalf("crypto/rand unavailable: %v", err)
+	}
+	return base64.URLEncoding.EncodeToString(b)
+}
+
+func createSession(remember bool) (string, time.Time) {
+	token := generateToken()
+	d := sessionDuration
+	if remember {
+		d = sessionDurationLong
+	}
+	expiry := time.Now().Add(d)
+	sessionMu.Lock()
+	sessions[token] = expiry
+	sessionMu.Unlock()
+	return token, expiry
+}
+
+func validateSession(r *http.Request) bool {
+	cookie, err := r.Cookie("workspace_session")
+	if err != nil {
+		return false
+	}
+	sessionMu.RLock()
+	expiry, ok := sessions[cookie.Value]
+	sessionMu.RUnlock()
+	return ok && time.Now().Before(expiry)
+}
+
+func clearSession(r *http.Request) {
+	cookie, err := r.Cookie("workspace_session")
+	if err != nil {
+		return
+	}
+	sessionMu.Lock()
+	delete(sessions, cookie.Value)
+	sessionMu.Unlock()
+}
 
 func envOrDefault(key, def string) string {
 	if v := os.Getenv(key); v != "" {
@@ -53,6 +114,7 @@ func main() {
 	cfgPort = envOrDefault("PORTAL_PORT", "3000")
 	cfgUsername = envOrDefault("PORTAL_USER", "su600")
 	cfgPassword = envOrDefault("PORTAL_PASS", "password123")
+	cfgSecureCookie = strings.EqualFold(os.Getenv("PORTAL_TLS"), "true")
 
 	rawDir := envOrDefault("PORTAL_DIR", "/root/.openclaw/workspace")
 	absDir, err := filepath.Abs(rawDir)
@@ -61,7 +123,24 @@ func main() {
 	}
 	cfgDirectory = absDir
 
+	// Periodically remove expired sessions to prevent unbounded memory growth.
+	go func() {
+		ticker := time.NewTicker(time.Hour)
+		defer ticker.Stop()
+		for range ticker.C {
+			now := time.Now()
+			sessionMu.Lock()
+			for token, expiry := range sessions {
+				if now.After(expiry) {
+					delete(sessions, token)
+				}
+			}
+			sessionMu.Unlock()
+		}
+	}()
+
 	mux := http.NewServeMux()
+	mux.HandleFunc("/login", loginHandler)
 	mux.HandleFunc("/", handler)
 	addr := ":" + cfgPort
 	log.Printf("🚀 Workspace Portal running at http://localhost%s  dir=%s", addr, cfgDirectory)
@@ -76,14 +155,65 @@ func main() {
 	log.Fatal(srv.ListenAndServe())
 }
 
-func checkAuth(r *http.Request) bool {
-	user, pass, ok := r.BasicAuth()
-	if !ok {
-		return false
+// loginHandler serves the login page (GET) and processes login form submissions (POST).
+func loginHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodGet {
+		if validateSession(r) {
+			http.Redirect(w, r, "/", http.StatusSeeOther)
+			return
+		}
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		fmt.Fprint(w, loginHTML)
+		return
 	}
-	userOK := subtle.ConstantTimeCompare([]byte(user), []byte(cfgUsername)) == 1
-	passOK := subtle.ConstantTimeCompare([]byte(pass), []byte(cfgPassword)) == 1
-	return userOK && passOK
+
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "Bad request", http.StatusBadRequest)
+		return
+	}
+
+	username := r.FormValue("username")
+	password := r.FormValue("password")
+	remember := r.FormValue("remember") == "on"
+
+	userOK := subtle.ConstantTimeCompare([]byte(username), []byte(cfgUsername)) == 1
+	passOK := subtle.ConstantTimeCompare([]byte(password), []byte(cfgPassword)) == 1
+
+	if !userOK || !passOK {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.WriteHeader(http.StatusUnauthorized)
+		const errDiv = `<div class="error-msg">用户名或密码错误，请重试。</div>`
+		page := strings.Replace(loginHTML, `<form method="POST" id="loginForm">`, errDiv+`<form method="POST" id="loginForm">`, 1)
+		fmt.Fprint(w, page)
+		return
+	}
+
+	token, expiry := createSession(remember)
+	d := sessionDuration
+	if remember {
+		d = sessionDurationLong
+	}
+	http.SetCookie(w, &http.Cookie{
+		Name:     "workspace_session",
+		Value:    token,
+		Path:     "/",
+		Expires:  expiry,
+		MaxAge:   int(d.Seconds()),
+		HttpOnly: true,
+		Secure:   cfgSecureCookie,
+		SameSite: http.SameSiteLaxMode,
+	})
+
+	next := r.URL.Query().Get("next")
+	if next == "" || !strings.HasPrefix(next, "/") {
+		next = "/"
+	}
+	http.Redirect(w, r, next, http.StatusSeeOther)
 }
 
 // isUnder reports whether child is rooted under parent (both must be absolute, cleaned paths).
@@ -109,20 +239,25 @@ func urlEncodePath(relPath string) string {
 }
 
 func handler(w http.ResponseWriter, r *http.Request) {
-	// Logout — no auth required (clears credentials)
+	// Logout — clear session and redirect to login
 	if r.URL.Path == "/logout" {
-		w.Header().Set("WWW-Authenticate", `Basic realm="LoggedOut"`)
-		w.WriteHeader(http.StatusUnauthorized)
-		fmt.Fprint(w, "Logged out. Close the browser tab to complete.")
+		clearSession(r)
+		http.SetCookie(w, &http.Cookie{
+			Name:     "workspace_session",
+			Value:    "",
+			Path:     "/",
+			MaxAge:   -1,
+			HttpOnly: true,
+			Secure:   cfgSecureCookie,
+		})
+		http.Redirect(w, r, "/login", http.StatusSeeOther)
 		return
 	}
 
 	// All other endpoints require authentication
-	if !checkAuth(r) {
-		w.Header().Set("WWW-Authenticate", `Basic realm="RocketWorkspace"`)
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		w.WriteHeader(http.StatusUnauthorized)
-		fmt.Fprint(w, "Authorization Required")
+	if !validateSession(r) {
+		next := r.URL.RequestURI()
+		http.Redirect(w, r, "/login?next="+url.QueryEscape(next), http.StatusSeeOther)
 		return
 	}
 
