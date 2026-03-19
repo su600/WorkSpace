@@ -2,7 +2,7 @@ package main
 
 import (
 	"bytes"
-	"encoding/base64"
+	"crypto/subtle"
 	"fmt"
 	"html"
 	"log"
@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -18,7 +19,6 @@ import (
 	"github.com/yuin/goldmark"
 	"github.com/yuin/goldmark/extension"
 	"github.com/yuin/goldmark/parser"
-	goldmarkhtml "github.com/yuin/goldmark/renderer/html"
 )
 
 // Configuration — all values can be overridden via environment variables.
@@ -27,7 +27,6 @@ var (
 	cfgDirectory string
 	cfgUsername  string
 	cfgPassword  string
-	authStr      string
 )
 
 func envOrDefault(key, def string) string {
@@ -48,27 +47,86 @@ var mdRenderer = goldmark.New(
 	goldmark.WithParserOptions(
 		parser.WithAutoHeadingID(),
 	),
-	goldmark.WithRendererOptions(
-		goldmarkhtml.WithUnsafe(),
-	),
 )
 
 func main() {
 	cfgPort = envOrDefault("PORTAL_PORT", "3000")
-	cfgDirectory = filepath.Clean(envOrDefault("PORTAL_DIR", "/root/.openclaw/workspace"))
 	cfgUsername = envOrDefault("PORTAL_USER", "su600")
 	cfgPassword = envOrDefault("PORTAL_PASS", "password123")
-	authStr = "Basic " + base64.StdEncoding.EncodeToString([]byte(cfgUsername+":"+cfgPassword))
+
+	rawDir := envOrDefault("PORTAL_DIR", "/root/.openclaw/workspace")
+	absDir, err := filepath.Abs(rawDir)
+	if err != nil {
+		log.Fatalf("cannot resolve PORTAL_DIR: %v", err)
+	}
+	cfgDirectory = absDir
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", handler)
 	addr := ":" + cfgPort
 	log.Printf("🚀 Workspace Portal running at http://localhost%s  dir=%s", addr, cfgDirectory)
-	log.Fatal(http.ListenAndServe(addr, mux))
+	srv := &http.Server{
+		Addr:              addr,
+		Handler:           mux,
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		WriteTimeout:      60 * time.Second,
+		IdleTimeout:       120 * time.Second,
+	}
+	log.Fatal(srv.ListenAndServe())
+}
+
+func checkAuth(r *http.Request) bool {
+	user, pass, ok := r.BasicAuth()
+	if !ok {
+		return false
+	}
+	userOK := subtle.ConstantTimeCompare([]byte(user), []byte(cfgUsername)) == 1
+	passOK := subtle.ConstantTimeCompare([]byte(pass), []byte(cfgPassword)) == 1
+	return userOK && passOK
+}
+
+// isUnder reports whether child is rooted under parent (both must be absolute, cleaned paths).
+func isUnder(child, parent string) bool {
+	rel, err := filepath.Rel(parent, child)
+	if err != nil {
+		return false
+	}
+	return rel == "." || (!strings.HasPrefix(rel, "..") && !filepath.IsAbs(rel))
+}
+
+// urlEncodePath encodes a slash-separated relative URL path by percent-encoding each
+// individual segment so that "/" separators are preserved.
+func urlEncodePath(relPath string) string {
+	if relPath == "" {
+		return ""
+	}
+	parts := strings.Split(relPath, "/")
+	for i, p := range parts {
+		parts[i] = url.PathEscape(p)
+	}
+	return strings.Join(parts, "/")
 }
 
 func handler(w http.ResponseWriter, r *http.Request) {
-	// PWA static resources
+	// Logout — no auth required (clears credentials)
+	if r.URL.Path == "/logout" {
+		w.Header().Set("WWW-Authenticate", `Basic realm="LoggedOut"`)
+		w.WriteHeader(http.StatusUnauthorized)
+		fmt.Fprint(w, "Logged out. Close the browser tab to complete.")
+		return
+	}
+
+	// All other endpoints require authentication
+	if !checkAuth(r) {
+		w.Header().Set("WWW-Authenticate", `Basic realm="RocketWorkspace"`)
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.WriteHeader(http.StatusUnauthorized)
+		fmt.Fprint(w, "Authorization Required")
+		return
+	}
+
+	// PWA static resources (served after auth)
 	if r.URL.Path == "/manifest.json" {
 		http.ServeFile(w, r, filepath.Join(cfgDirectory, "dashboard/manifest_workspace.json"))
 		return
@@ -79,35 +137,20 @@ func handler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Logout
-	if r.URL.Path == "/logout" {
-		w.Header().Set("WWW-Authenticate", `Basic realm="LoggedOut"`)
-		w.WriteHeader(http.StatusUnauthorized)
-		fmt.Fprint(w, "Logged out. Close the browser tab to complete.")
+	// Decode and clean the request path into a relative URL path (always "/"-separated)
+	relPath := path.Clean(strings.TrimPrefix(r.URL.Path, "/"))
+	if relPath == "." {
+		relPath = ""
+	}
+	// Reject any remaining traversal sequences as an early guard
+	if strings.HasPrefix(relPath, "../") || relPath == ".." {
+		http.Error(w, "Access denied", http.StatusForbidden)
 		return
 	}
 
-	// Basic auth
-	if r.Header.Get("Authorization") != authStr {
-		w.Header().Set("WWW-Authenticate", `Basic realm="RocketWorkspace"`)
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		w.WriteHeader(http.StatusUnauthorized)
-		fmt.Fprint(w, "Authorization Required")
-		return
-	}
-
-	// Decode path
-	rawPath := strings.TrimPrefix(r.URL.Path, "/")
-	relPath, err := url.PathUnescape(rawPath)
-	if err != nil {
-		http.Error(w, "Bad request", http.StatusBadRequest)
-		return
-	}
-
-	absPath := filepath.Clean(filepath.Join(cfgDirectory, relPath))
-
-	// Security: prevent path traversal
-	if !strings.HasPrefix(absPath+string(os.PathSeparator), cfgDirectory+string(os.PathSeparator)) && absPath != cfgDirectory {
+	// Resolve to absolute filesystem path and verify it stays inside cfgDirectory
+	absPath := filepath.Join(cfgDirectory, filepath.FromSlash(relPath))
+	if !isUnder(absPath, cfgDirectory) {
 		http.Error(w, "Access denied", http.StatusForbidden)
 		return
 	}
@@ -317,7 +360,7 @@ a:hover{text-decoration:underline}
 		if bc.Path == "" {
 			sb.WriteString(`<a href="/">🏠 根目录</a>`)
 		} else if i < len(breadcrumbs)-1 {
-			sb.WriteString(`<a href="/` + html.EscapeString(bc.Path) + `">` + html.EscapeString(bc.Name) + `</a>`)
+			sb.WriteString(`<a href="/` + urlEncodePath(bc.Path) + `">` + html.EscapeString(bc.Name) + `</a>`)
 		} else {
 			sb.WriteString(`<span>` + html.EscapeString(bc.Name) + `</span>`)
 		}
@@ -335,13 +378,15 @@ a:hover{text-decoration:underline}
 
 	// Parent directory link
 	if relPath != "" {
-		parent := filepath.Dir(relPath)
+		parent := path.Dir(relPath)
 		if parent == "." {
 			parent = ""
 		}
-		parentHref := "/" + url.PathEscape(parent)
+		var parentHref string
 		if parent == "" {
 			parentHref = "/"
+		} else {
+			parentHref = "/" + urlEncodePath(parent)
 		}
 		sb.WriteString(`<tr><td class="col-name"><div class="file-name"><span class="file-icon">📁</span><a href="` + parentHref + `" class="file-link dir-link">..</a></div></td><td class="col-size">—</td><td class="col-mtime">—</td><td class="col-action"></td></tr>`)
 	}
@@ -353,9 +398,9 @@ a:hover{text-decoration:underline}
 			escapedName := html.EscapeString(f.Name)
 			var hrefPath string
 			if relPath == "" {
-				hrefPath = "/" + url.PathEscape(f.Name)
+				hrefPath = "/" + urlEncodePath(f.Name)
 			} else {
-				hrefPath = "/" + url.PathEscape(relPath) + "/" + url.PathEscape(f.Name)
+				hrefPath = "/" + urlEncodePath(relPath) + "/" + urlEncodePath(f.Name)
 			}
 
 			var icon, sizeStr, actionBtn string
@@ -376,7 +421,7 @@ a:hover{text-decoration:underline}
 			}
 			target := ""
 			if strings.HasSuffix(strings.ToLower(f.Name), ".md") {
-				target = ` target="_blank"`
+				target = ` target="_blank" rel="noopener noreferrer"`
 			}
 
 			sb.WriteString(`<tr>`)
@@ -408,14 +453,16 @@ func renderMarkdown(w http.ResponseWriter, absPath, relPath string) {
 		return
 	}
 
-	// Build parent URL for back link
-	parent := filepath.Dir(relPath)
+	// Build parent URL for back link (relPath uses "/" as separator)
+	parent := path.Dir(relPath)
 	if parent == "." {
 		parent = ""
 	}
-	parentURL := "/"
-	if parent != "" {
-		parentURL = "/" + url.PathEscape(parent)
+	var parentURL string
+	if parent == "" {
+		parentURL = "/"
+	} else {
+		parentURL = "/" + urlEncodePath(parent)
 	}
 
 	fileName := filepath.Base(relPath)
@@ -545,7 +592,7 @@ func buildBreadcrumbs(relPath string) []breadcrumb {
 	if relPath == "" {
 		return bcs
 	}
-	parts := strings.Split(relPath, string(os.PathSeparator))
+	parts := strings.Split(relPath, "/")
 	for i, p := range parts {
 		if p == "" {
 			continue
