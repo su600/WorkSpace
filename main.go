@@ -6,6 +6,7 @@ import (
 	"crypto/subtle"
 	_ "embed"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"html"
 	"log"
@@ -791,12 +792,17 @@ func serveDownload(w http.ResponseWriter, r *http.Request, absPath string) {
 // maxMarkdownEditBytes caps the size of an edited markdown file at 10 MiB.
 const maxMarkdownEditBytes = 10 << 20
 
-// saveMarkdown writes the edited markdown content back to disk, then redirects
-// to the preview page.
+// saveMarkdown writes the edited markdown content back to disk atomically, then
+// redirects to the preview page.
 func saveMarkdown(w http.ResponseWriter, r *http.Request, absPath, relPath string) {
 	r.Body = http.MaxBytesReader(w, r.Body, maxMarkdownEditBytes)
 	if err := r.ParseForm(); err != nil {
-		http.Error(w, "Bad request", http.StatusBadRequest)
+		var maxBytesErr *http.MaxBytesError
+		if errors.As(err, &maxBytesErr) {
+			http.Error(w, "Content too large", http.StatusRequestEntityTooLarge)
+		} else {
+			http.Error(w, "Bad request", http.StatusBadRequest)
+		}
 		return
 	}
 	content := r.FormValue("content")
@@ -804,15 +810,56 @@ func saveMarkdown(w http.ResponseWriter, r *http.Request, absPath, relPath strin
 		http.Error(w, "Content too large", http.StatusRequestEntityTooLarge)
 		return
 	}
-	info, err := os.Stat(absPath)
+
+	// Use Lstat so we see the symlink itself rather than its target; reject symlinks
+	// to prevent writing outside cfgDirectory via a symlink planted inside it.
+	info, err := os.Lstat(absPath)
 	if err != nil {
 		http.Error(w, "File not found", http.StatusNotFound)
 		return
 	}
-	if err := os.WriteFile(absPath, []byte(content), info.Mode()); err != nil {
+	if info.Mode()&os.ModeSymlink != 0 {
+		http.Error(w, "Cannot save file", http.StatusBadRequest)
+		return
+	}
+
+	// Atomic write: write to a sibling temp file, sync, then rename into place.
+	dir := filepath.Dir(absPath)
+	tmp, err := os.CreateTemp(dir, ".md-edit-*")
+	if err != nil {
 		http.Error(w, "Cannot save file", http.StatusInternalServerError)
 		return
 	}
+	tmpName := tmp.Name()
+	// Ensure temp file is cleaned up on any early exit.
+	committed := false
+	defer func() {
+		if !committed {
+			os.Remove(tmpName)
+		}
+	}()
+	if _, err := tmp.WriteString(content); err != nil {
+		tmp.Close()
+		http.Error(w, "Cannot save file", http.StatusInternalServerError)
+		return
+	}
+	if err := tmp.Sync(); err != nil {
+		tmp.Close()
+		http.Error(w, "Cannot save file", http.StatusInternalServerError)
+		return
+	}
+	if err := tmp.Chmod(info.Mode()); err != nil {
+		tmp.Close()
+		http.Error(w, "Cannot save file", http.StatusInternalServerError)
+		return
+	}
+	tmp.Close()
+	if err := os.Rename(tmpName, absPath); err != nil {
+		http.Error(w, "Cannot save file", http.StatusInternalServerError)
+		return
+	}
+	committed = true
+
 	var redirectURL string
 	if relPath == "" {
 		redirectURL = "/"
