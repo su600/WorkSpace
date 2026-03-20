@@ -2,12 +2,15 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"crypto/rand"
 	"crypto/subtle"
 	_ "embed"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"html"
+	"io/fs"
 	"log"
 	"mime"
 	"net/http"
@@ -44,8 +47,10 @@ var (
 )
 
 const (
-	sessionDuration       = 24 * time.Hour
-	sessionDurationLong   = 30 * 24 * time.Hour
+	sessionDuration     = 24 * time.Hour
+	sessionDurationLong = 30 * 24 * time.Hour
+	mtimeFormat         = "01-02 15:04"
+	searchMaxResults    = 500
 )
 
 func generateToken() string {
@@ -141,6 +146,7 @@ func main() {
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/login", loginHandler)
+	mux.HandleFunc("/search", searchHandler)
 	mux.HandleFunc("/", handler)
 	addr := ":" + cfgPort
 	log.Printf("🚀 Workspace Portal running at http://localhost%s  dir=%s", addr, cfgDirectory)
@@ -360,6 +366,234 @@ func handler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// ─── Search ───────────────────────────────────────────────────────────────────
+
+type searchResult struct {
+	RelPath string
+	Name    string
+	IsDir   bool
+	Size    int64
+	Mtime   time.Time
+}
+
+func searchHandler(w http.ResponseWriter, r *http.Request) {
+	if !validateSession(r) {
+		next := r.URL.RequestURI()
+		http.Redirect(w, r, "/login?next="+url.QueryEscape(next), http.StatusSeeOther)
+		return
+	}
+
+	query := strings.TrimSpace(r.URL.Query().Get("q"))
+
+	var results []searchResult
+	if query != "" {
+		lowerQ := strings.ToLower(query)
+		ctx := r.Context()
+		walkErr := filepath.WalkDir(cfgDirectory, func(p string, d os.DirEntry, err error) error {
+			// Stop if the client disconnected.
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
+			if err != nil {
+				return nil // skip unreadable entries
+			}
+			// Skip the root itself.
+			if p == cfgDirectory {
+				return nil
+			}
+			// Skip symlinks to avoid escaping cfgDirectory via symlink targets.
+			if d.Type()&os.ModeSymlink != 0 {
+				return nil
+			}
+			if strings.Contains(strings.ToLower(d.Name()), lowerQ) {
+				rel, relErr := filepath.Rel(cfgDirectory, p)
+				if relErr != nil {
+					return nil
+				}
+				rel = filepath.ToSlash(rel)
+				info, infoErr := d.Info()
+				if infoErr != nil {
+					return nil
+				}
+				results = append(results, searchResult{
+					RelPath: rel,
+					Name:    d.Name(),
+					IsDir:   d.IsDir(),
+					Size:    info.Size(),
+					Mtime:   info.ModTime(),
+				})
+				if len(results) >= searchMaxResults {
+					return fs.SkipAll // reached cap; stop walking
+				}
+			}
+			return nil
+		})
+		// Only log unexpected walk errors; ignore context cancellation, deadline, and SkipAll.
+		if walkErr != nil && !errors.Is(walkErr, context.Canceled) && !errors.Is(walkErr, context.DeadlineExceeded) && !errors.Is(walkErr, fs.SkipAll) {
+			log.Printf("search walk error: %v", walkErr)
+		}
+	}
+
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.WriteHeader(http.StatusOK)
+
+	var sb strings.Builder
+	sb.WriteString(`<!DOCTYPE html><html lang="zh-CN"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>🔍 搜索 — Workspace</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+:root{--blue:#1a73e8;--blue-dark:#1558b0;--bg:#f0f2f5;--card:#fff;--border:#e8eaed;--text:#202124;--muted:#5f6368;--hover:#f8f9fa}
+body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Oxygen,Ubuntu,sans-serif;background:var(--bg);color:var(--text);min-height:100vh}
+a{color:var(--blue);text-decoration:none}
+a:hover{text-decoration:underline}
+.header{background:linear-gradient(135deg,#1a73e8,#0d47a1);color:#fff;padding:0 16px;height:56px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:100;box-shadow:0 2px 8px rgba(0,0,0,.2)}
+.header-left{display:flex;align-items:center;gap:10px;overflow:hidden}
+.header-logo{font-size:20px;flex-shrink:0}
+.header-right{display:flex;align-items:center;gap:8px;flex-shrink:0}
+.btn-logout{color:#fff;background:rgba(255,255,255,.2);border:1px solid rgba(255,255,255,.3);padding:5px 12px;border-radius:20px;font-size:12px;cursor:pointer;transition:background .15s}
+.btn-logout:hover{background:rgba(255,255,255,.3);text-decoration:none}
+.search-bar{display:flex;align-items:center;gap:8px;background:rgba(255,255,255,.15);border:1px solid rgba(255,255,255,.3);border-radius:24px;padding:4px 12px;flex:1;max-width:480px;margin:0 12px}
+.search-bar input{background:none;border:none;outline:none;color:#fff;font-size:14px;width:100%}
+.search-bar input::placeholder{color:rgba(255,255,255,.7)}
+.search-bar button{background:none;border:none;color:#fff;cursor:pointer;font-size:14px;padding:0;line-height:1}
+.search-bar--compact{flex:none;max-width:220px;margin:0 8px}
+.container{max-width:1200px;margin:12px auto;padding:0 12px 24px}
+.card{background:var(--card);border-radius:12px;box-shadow:0 1px 4px rgba(0,0,0,.08);overflow:hidden}
+.card-header{padding:14px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px}
+.card-header-title{font-size:14px;font-weight:600;color:var(--muted)}
+.file-count{font-size:12px;color:var(--muted);background:#f1f3f4;padding:2px 8px;border-radius:10px}
+.file-table{width:100%;border-collapse:collapse}
+.file-table th{background:#f8f9fa;padding:10px 16px;text-align:left;font-size:12px;font-weight:600;color:var(--muted);letter-spacing:.5px;text-transform:uppercase;white-space:nowrap}
+.file-table td{padding:10px 16px;border-top:1px solid var(--border);font-size:14px;vertical-align:middle}
+.file-table tr:hover td{background:var(--hover)}
+.col-name{min-width:160px}
+.col-path{color:var(--muted);font-size:13px}
+.col-size{width:90px;text-align:right;color:var(--muted)}
+.col-mtime{width:130px;color:var(--muted)}
+.col-action{width:60px;text-align:center}
+.file-name{display:flex;align-items:center;gap:8px}
+.file-icon{font-size:18px;flex-shrink:0;line-height:1}
+.file-link{font-weight:500;color:var(--text)}
+.file-link:hover{color:var(--blue)}
+.dir-link{color:var(--blue) !important}
+.btn-dl{display:inline-flex;align-items:center;gap:3px;padding:4px 10px;border:1px solid var(--border);border-radius:6px;color:var(--muted);font-size:12px;transition:all .15s;background:var(--card)}
+.btn-dl:hover{border-color:var(--blue);color:var(--blue);background:#e8f0fe;text-decoration:none}
+.empty{text-align:center;padding:48px 24px;color:var(--muted)}
+.empty-icon{font-size:48px;margin-bottom:12px}
+.empty-text{font-size:14px}
+.hint{text-align:center;padding:48px 24px;color:var(--muted)}
+.hint-icon{font-size:48px;margin-bottom:12px}
+.hint-text{font-size:14px}
+@media(max-width:640px){
+  .file-table thead{display:none}
+  .file-table,.file-table tbody,.file-table tr,.file-table td{display:block;width:100%}
+  .file-table tr{padding:10px 16px;border-top:1px solid var(--border);display:flex;flex-wrap:wrap;gap:4px;align-items:center}
+  .file-table tr:hover{background:var(--hover)}
+  .file-table td{padding:0;border:none;font-size:13px}
+  .col-name{width:100%;order:1}
+  .col-path{width:100%;order:2}
+  .col-size{order:3;margin-left:auto;text-align:right}
+  .col-mtime{order:4;font-size:12px}
+  .col-action{order:5;margin-left:8px}
+  .search-bar{max-width:none;margin:0 4px}
+  .container{padding:0 8px 24px}
+}
+</style>
+</head>
+<body>
+<header class="header">
+  <div class="header-left">
+    <span class="header-logo">🚀</span>
+  </div>
+  <form class="search-bar" action="/search" method="GET">
+    <span>🔍</span>
+    <input type="text" name="q" placeholder="搜索文件名…" value="` + html.EscapeString(query) + `" autofocus>
+    <button type="submit">搜索</button>
+  </form>
+  <div class="header-right">
+    <a href="/" class="btn-logout">🏠 根目录</a>
+    <a href="/logout" class="btn-logout">退出登录</a>
+  </div>
+</header>
+`)
+
+	sb.WriteString(`<div class="container"><div class="card">`)
+
+	if query == "" {
+		sb.WriteString(`<div class="hint"><div class="hint-icon">🔍</div><div class="hint-text">请在上方输入关键词搜索文件</div></div>`)
+	} else if len(results) == 0 {
+		sb.WriteString(`<div class="card-header"><span class="card-header-title">🔍 搜索：` + html.EscapeString(query) + `</span><span class="file-count">0 项</span></div>`)
+		sb.WriteString(`<div class="empty"><div class="empty-icon">🔎</div><div class="empty-text">未找到匹配的文件或目录</div></div>`)
+	} else {
+		sb.WriteString(`<div class="card-header"><span class="card-header-title">🔍 搜索：` + html.EscapeString(query) + `</span><span class="file-count">` + fmt.Sprintf("%d 项", len(results)) + `</span></div>`)
+		sb.WriteString(`<table class="file-table"><thead><tr>`)
+		sb.WriteString(`<th class="col-name">名称</th>`)
+		sb.WriteString(`<th class="col-path">路径</th>`)
+		sb.WriteString(`<th class="col-size">大小</th>`)
+		sb.WriteString(`<th class="col-mtime">修改时间</th>`)
+		sb.WriteString(`<th class="col-action">操作</th>`)
+		sb.WriteString(`</tr></thead><tbody>`)
+
+		for _, res := range results {
+			escapedName := html.EscapeString(res.Name)
+			hrefPath := "/" + urlEncodePath(res.RelPath)
+			parentPath := path.Dir(res.RelPath)
+			if parentPath == "." {
+				parentPath = ""
+			}
+			var parentHref string
+			if parentPath == "" {
+				parentHref = "/"
+			} else {
+				parentHref = "/" + urlEncodePath(parentPath)
+			}
+
+			var icon, sizeStr, actionBtn string
+			if res.IsDir {
+				icon = "📁"
+				sizeStr = "—"
+				actionBtn = ""
+			} else {
+				icon = fileIcon(res.Name)
+				sizeStr = humanSize(res.Size)
+				actionBtn = `<a href="` + hrefPath + `?download=1" class="btn-dl" title="下载">⬇</a>`
+			}
+
+			mtimeStr := res.Mtime.Format(mtimeFormat)
+			linkClass := "file-link"
+			if res.IsDir {
+				linkClass += " dir-link"
+			}
+			target := ""
+			if strings.HasSuffix(strings.ToLower(res.Name), ".md") {
+				target = ` target="_blank" rel="noopener noreferrer"`
+			}
+
+			// Show parent directory as the path column
+			var pathDisplay string
+			if parentPath == "" {
+				pathDisplay = "/"
+			} else {
+				pathDisplay = "/" + html.EscapeString(parentPath)
+			}
+
+			sb.WriteString(`<tr>`)
+			sb.WriteString(`<td class="col-name"><div class="file-name"><span class="file-icon">` + icon + `</span><a href="` + hrefPath + `" class="` + linkClass + `"` + target + `>` + escapedName + `</a></div></td>`)
+			sb.WriteString(`<td class="col-path"><a href="` + parentHref + `" class="file-link" style="color:var(--muted);font-size:12px">` + pathDisplay + `</a></td>`)
+			sb.WriteString(`<td class="col-size">` + sizeStr + `</td>`)
+			sb.WriteString(`<td class="col-mtime">` + mtimeStr + `</td>`)
+			sb.WriteString(`<td class="col-action">` + actionBtn + `</td>`)
+			sb.WriteString(`</tr>`)
+		}
+		sb.WriteString(`</tbody></table>`)
+	}
+
+	sb.WriteString(`</div></div></body></html>`)
+	fmt.Fprint(w, sb.String())
+}
+
 // ─── Directory listing ────────────────────────────────────────────────────────
 
 type fileEntry struct {
@@ -463,6 +697,11 @@ a:hover{text-decoration:underline}
 .header-right{display:flex;align-items:center;gap:8px;flex-shrink:0}
 .btn-logout{color:#fff;background:rgba(255,255,255,.2);border:1px solid rgba(255,255,255,.3);padding:5px 12px;border-radius:20px;font-size:12px;cursor:pointer;transition:background .15s}
 .btn-logout:hover{background:rgba(255,255,255,.3);text-decoration:none}
+.search-bar{display:flex;align-items:center;gap:8px;background:rgba(255,255,255,.15);border:1px solid rgba(255,255,255,.3);border-radius:24px;padding:4px 12px;flex:1;max-width:480px;margin:0 12px}
+.search-bar input{background:none;border:none;outline:none;color:#fff;font-size:14px;width:100%}
+.search-bar input::placeholder{color:rgba(255,255,255,.7)}
+.search-bar button{background:none;border:none;color:#fff;cursor:pointer;font-size:14px;padding:0;line-height:1}
+.search-bar--compact{flex:none;max-width:220px;margin:0 8px}
 
 /* Breadcrumb */
 .breadcrumb{padding:12px 16px 0;display:flex;flex-wrap:wrap;gap:4px;align-items:center;font-size:13px;color:var(--muted)}
@@ -527,6 +766,11 @@ a:hover{text-decoration:underline}
     <span class="header-logo">🚀</span>
     <span class="header-title">` + html.EscapeString("/"+relPath) + `</span>
   </div>
+  <form class="search-bar search-bar--compact" action="/search" method="GET">
+    <span>🔍</span>
+    <input type="text" name="q" placeholder="搜索文件名…">
+    <button type="submit">搜</button>
+  </form>
   <div class="header-right">
     <a href="/logout" class="btn-logout">退出登录</a>
   </div>
@@ -600,7 +844,7 @@ a:hover{text-decoration:underline}
 					`</form></div>`
 			}
 
-			mtimeStr := f.Mtime.Format("01-02 15:04")
+			mtimeStr := f.Mtime.Format(mtimeFormat)
 			linkClass := "file-link"
 			if f.IsDir {
 				linkClass += " dir-link"
@@ -651,7 +895,16 @@ func renderMarkdown(w http.ResponseWriter, absPath, relPath string) {
 		parentURL = "/" + urlEncodePath(parent)
 	}
 
+	// Build the form action URL for saving edits
+	var editActionURL string
+	if relPath == "" {
+		editActionURL = "/?edit"
+	} else {
+		editActionURL = "/" + urlEncodePath(relPath) + "?edit"
+	}
+
 	fileName := filepath.Base(relPath)
+	escapedSource := html.EscapeString(string(content))
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
@@ -677,6 +930,12 @@ a:hover{text-decoration:underline}
 .btn-back:hover{background:rgba(255,255,255,.3);text-decoration:none}
 .btn-logout{color:rgba(255,255,255,.8);font-size:12px;padding:5px 10px;border-radius:20px;transition:background .15s}
 .btn-logout:hover{background:rgba(255,255,255,.15);text-decoration:none;color:#fff}
+.btn-edit{color:#fff;background:rgba(255,255,255,.2);border:1px solid rgba(255,255,255,.3);padding:5px 12px;border-radius:20px;font-size:12px;cursor:pointer;transition:background .15s;white-space:nowrap}
+.btn-edit:hover{background:rgba(255,255,255,.3)}
+.btn-save{color:#fff;background:#1e8a3c;border:1px solid rgba(255,255,255,.3);padding:5px 12px;border-radius:20px;font-size:12px;cursor:pointer;transition:background .15s;white-space:nowrap}
+.btn-save:hover{background:#176b2f}
+.btn-cancel{color:#fff;background:rgba(255,255,255,.2);border:1px solid rgba(255,255,255,.3);padding:5px 12px;border-radius:20px;font-size:12px;cursor:pointer;transition:background .15s;white-space:nowrap}
+.btn-cancel:hover{background:rgba(255,255,255,.3)}
 
 /* Container */
 .wrapper{max-width:860px;margin:24px auto;padding:0 16px 48px}
@@ -711,6 +970,10 @@ a:hover{text-decoration:underline}
 .md-body .task-list-item{display:flex;align-items:flex-start;gap:8px}
 .md-body .task-list-item input{margin-top:4px;flex-shrink:0}
 
+/* Editor */
+.edit-card{background:var(--card);border-radius:12px;box-shadow:0 1px 4px rgba(0,0,0,.08);display:none;flex-direction:column}
+.md-editor{width:100%%;min-height:60vh;padding:20px;font-family:"SFMono-Regular",Consolas,"Liberation Mono",Menlo,monospace;font-size:14px;line-height:1.6;border:none;outline:none;resize:vertical;border-radius:12px;color:var(--text);background:var(--card)}
+
 @media(max-width:640px){
   .wrapper{padding:0 8px 32px;margin:12px auto}
   .md-card{padding:20px 16px;border-radius:8px}
@@ -728,22 +991,50 @@ a:hover{text-decoration:underline}
     <span class="header-title">%s</span>
   </div>
   <div class="header-right">
-    <a href="%s" class="btn-back">← 返回</a>
+    <a href="%s" id="btn-back" class="btn-back">← 返回</a>
+    <button id="btn-edit" class="btn-edit" onclick="startEdit()">✏️ 编辑</button>
+    <button id="btn-save" class="btn-save" style="display:none" onclick="document.getElementById('edit-form').submit()">💾 保存</button>
+    <button id="btn-cancel" class="btn-cancel" style="display:none" onclick="cancelEdit()">✕ 取消</button>
     <a href="/logout" class="btn-logout">退出</a>
   </div>
 </header>
 <div class="wrapper">
-  <div class="md-card">
+  <div id="preview-card" class="md-card">
     <article class="md-body">
 %s
     </article>
   </div>
+  <form id="edit-form" method="POST" action="%s" class="edit-card">
+    <textarea id="md-editor" name="content" class="md-editor" spellcheck="false">%s</textarea>
+  </form>
 </div>
+<script>
+function startEdit(){
+  document.getElementById('preview-card').style.display='none';
+  var ef=document.getElementById('edit-form');
+  ef.style.display='flex';
+  document.getElementById('md-editor').focus();
+  document.getElementById('btn-edit').style.display='none';
+  document.getElementById('btn-back').style.display='none';
+  document.getElementById('btn-save').style.display='';
+  document.getElementById('btn-cancel').style.display='';
+}
+function cancelEdit(){
+  document.getElementById('preview-card').style.display='';
+  document.getElementById('edit-form').style.display='none';
+  document.getElementById('btn-edit').style.display='';
+  document.getElementById('btn-back').style.display='';
+  document.getElementById('btn-save').style.display='none';
+  document.getElementById('btn-cancel').style.display='none';
+}
+</script>
 </body></html>`,
 		html.EscapeString(fileName),
 		html.EscapeString(fileName),
 		parentURL,
 		rendered.String(),
+		editActionURL,
+		escapedSource,
 	)
 }
 
@@ -764,6 +1055,86 @@ func serveDownload(w http.ResponseWriter, r *http.Request, absPath string) {
 	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename*=UTF-8''%s`, fileName))
 	w.Header().Set("Content-Type", "application/octet-stream")
 	http.ServeFile(w, r, absPath)
+}
+
+// maxMarkdownEditBytes caps the size of an edited markdown file at 10 MiB.
+const maxMarkdownEditBytes = 10 << 20
+
+// saveMarkdown writes the edited markdown content back to disk atomically, then
+// redirects to the preview page.
+func saveMarkdown(w http.ResponseWriter, r *http.Request, absPath, relPath string) {
+	r.Body = http.MaxBytesReader(w, r.Body, maxMarkdownEditBytes)
+	if err := r.ParseForm(); err != nil {
+		var maxBytesErr *http.MaxBytesError
+		if errors.As(err, &maxBytesErr) {
+			http.Error(w, "Content too large", http.StatusRequestEntityTooLarge)
+		} else {
+			http.Error(w, "Bad request", http.StatusBadRequest)
+		}
+		return
+	}
+	content := r.FormValue("content")
+	if int64(len(content)) > maxMarkdownEditBytes {
+		http.Error(w, "Content too large", http.StatusRequestEntityTooLarge)
+		return
+	}
+
+	// Use Lstat so we see the symlink itself rather than its target; reject symlinks
+	// to prevent writing outside cfgDirectory via a symlink planted inside it.
+	info, err := os.Lstat(absPath)
+	if err != nil {
+		http.Error(w, "File not found", http.StatusNotFound)
+		return
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		http.Error(w, "Cannot save file", http.StatusBadRequest)
+		return
+	}
+
+	// Atomic write: write to a sibling temp file, sync, then rename into place.
+	dir := filepath.Dir(absPath)
+	tmp, err := os.CreateTemp(dir, ".md-edit-*")
+	if err != nil {
+		http.Error(w, "Cannot save file", http.StatusInternalServerError)
+		return
+	}
+	tmpName := tmp.Name()
+	// Ensure temp file is cleaned up on any early exit.
+	committed := false
+	defer func() {
+		if !committed {
+			os.Remove(tmpName)
+		}
+	}()
+	if _, err := tmp.WriteString(content); err != nil {
+		tmp.Close()
+		http.Error(w, "Cannot save file", http.StatusInternalServerError)
+		return
+	}
+	if err := tmp.Sync(); err != nil {
+		tmp.Close()
+		http.Error(w, "Cannot save file", http.StatusInternalServerError)
+		return
+	}
+	if err := tmp.Chmod(info.Mode()); err != nil {
+		tmp.Close()
+		http.Error(w, "Cannot save file", http.StatusInternalServerError)
+		return
+	}
+	tmp.Close()
+	if err := os.Rename(tmpName, absPath); err != nil {
+		http.Error(w, "Cannot save file", http.StatusInternalServerError)
+		return
+	}
+	committed = true
+
+	var redirectURL string
+	if relPath == "" {
+		redirectURL = "/"
+	} else {
+		redirectURL = "/" + urlEncodePath(relPath)
+	}
+	http.Redirect(w, r, redirectURL, http.StatusSeeOther)
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
