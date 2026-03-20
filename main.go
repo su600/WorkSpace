@@ -2,12 +2,15 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"crypto/rand"
 	"crypto/subtle"
 	_ "embed"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"html"
+	"io/fs"
 	"log"
 	"mime"
 	"net/http"
@@ -47,6 +50,7 @@ const (
 	sessionDuration     = 24 * time.Hour
 	sessionDurationLong = 30 * 24 * time.Hour
 	mtimeFormat         = "01-02 15:04"
+	searchMaxResults    = 500
 )
 
 func generateToken() string {
@@ -356,12 +360,21 @@ func searchHandler(w http.ResponseWriter, r *http.Request) {
 	var results []searchResult
 	if query != "" {
 		lowerQ := strings.ToLower(query)
-		if err := filepath.WalkDir(cfgDirectory, func(p string, d os.DirEntry, err error) error {
+		ctx := r.Context()
+		walkErr := filepath.WalkDir(cfgDirectory, func(p string, d os.DirEntry, err error) error {
+			// Stop if the client disconnected.
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
 			if err != nil {
 				return nil // skip unreadable entries
 			}
-			// Skip the root itself
+			// Skip the root itself.
 			if p == cfgDirectory {
+				return nil
+			}
+			// Skip symlinks to avoid escaping cfgDirectory via symlink targets.
+			if d.Type()&os.ModeSymlink != 0 {
 				return nil
 			}
 			if strings.Contains(strings.ToLower(d.Name()), lowerQ) {
@@ -381,10 +394,15 @@ func searchHandler(w http.ResponseWriter, r *http.Request) {
 					Size:    info.Size(),
 					Mtime:   info.ModTime(),
 				})
+				if len(results) >= searchMaxResults {
+					return fs.SkipAll // reached cap; stop walking
+				}
 			}
 			return nil
-		}); err != nil {
-			log.Printf("search walk error: %v", err)
+		})
+		// Only log unexpected walk errors; ignore context cancellation, deadline, and SkipAll.
+		if walkErr != nil && !errors.Is(walkErr, context.Canceled) && !errors.Is(walkErr, context.DeadlineExceeded) && !errors.Is(walkErr, fs.SkipAll) {
+			log.Printf("search walk error: %v", walkErr)
 		}
 	}
 
@@ -651,6 +669,10 @@ a:hover{text-decoration:underline}
 .header-right{display:flex;align-items:center;gap:8px;flex-shrink:0}
 .btn-logout{color:#fff;background:rgba(255,255,255,.2);border:1px solid rgba(255,255,255,.3);padding:5px 12px;border-radius:20px;font-size:12px;cursor:pointer;transition:background .15s}
 .btn-logout:hover{background:rgba(255,255,255,.3);text-decoration:none}
+.search-bar{display:flex;align-items:center;gap:8px;background:rgba(255,255,255,.15);border:1px solid rgba(255,255,255,.3);border-radius:24px;padding:4px 12px;flex:1;max-width:480px;margin:0 12px}
+.search-bar input{background:none;border:none;outline:none;color:#fff;font-size:14px;width:100%}
+.search-bar input::placeholder{color:rgba(255,255,255,.7)}
+.search-bar button{background:none;border:none;color:#fff;cursor:pointer;font-size:14px;padding:0;line-height:1}
 .search-bar--compact{flex:none;max-width:220px;margin:0 8px}
 
 /* Breadcrumb */
