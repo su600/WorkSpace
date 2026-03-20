@@ -325,6 +325,16 @@ func handler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Handle POST requests for MD file editing
+	if _, ok := query["edit"]; ok && r.Method == http.MethodPost {
+		if !info.IsDir() && strings.HasSuffix(strings.ToLower(absPath), ".md") {
+			saveMarkdown(w, r, absPath, relPath)
+			return
+		}
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
 	if info.IsDir() {
 		listDirectory(w, r, absPath, relPath)
 	} else if strings.HasSuffix(strings.ToLower(absPath), ".md") {
@@ -860,7 +870,16 @@ func renderMarkdown(w http.ResponseWriter, absPath, relPath string) {
 		parentURL = "/" + urlEncodePath(parent)
 	}
 
+	// Build the form action URL for saving edits
+	var editActionURL string
+	if relPath == "" {
+		editActionURL = "/?edit"
+	} else {
+		editActionURL = "/" + urlEncodePath(relPath) + "?edit"
+	}
+
 	fileName := filepath.Base(relPath)
+	escapedSource := html.EscapeString(string(content))
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
@@ -886,6 +905,12 @@ a:hover{text-decoration:underline}
 .btn-back:hover{background:rgba(255,255,255,.3);text-decoration:none}
 .btn-logout{color:rgba(255,255,255,.8);font-size:12px;padding:5px 10px;border-radius:20px;transition:background .15s}
 .btn-logout:hover{background:rgba(255,255,255,.15);text-decoration:none;color:#fff}
+.btn-edit{color:#fff;background:rgba(255,255,255,.2);border:1px solid rgba(255,255,255,.3);padding:5px 12px;border-radius:20px;font-size:12px;cursor:pointer;transition:background .15s;white-space:nowrap}
+.btn-edit:hover{background:rgba(255,255,255,.3)}
+.btn-save{color:#fff;background:#1e8a3c;border:1px solid rgba(255,255,255,.3);padding:5px 12px;border-radius:20px;font-size:12px;cursor:pointer;transition:background .15s;white-space:nowrap}
+.btn-save:hover{background:#176b2f}
+.btn-cancel{color:#fff;background:rgba(255,255,255,.2);border:1px solid rgba(255,255,255,.3);padding:5px 12px;border-radius:20px;font-size:12px;cursor:pointer;transition:background .15s;white-space:nowrap}
+.btn-cancel:hover{background:rgba(255,255,255,.3)}
 
 /* Container */
 .wrapper{max-width:860px;margin:24px auto;padding:0 16px 48px}
@@ -920,6 +945,10 @@ a:hover{text-decoration:underline}
 .md-body .task-list-item{display:flex;align-items:flex-start;gap:8px}
 .md-body .task-list-item input{margin-top:4px;flex-shrink:0}
 
+/* Editor */
+.edit-card{background:var(--card);border-radius:12px;box-shadow:0 1px 4px rgba(0,0,0,.08);display:none;flex-direction:column}
+.md-editor{width:100%%;min-height:60vh;padding:20px;font-family:"SFMono-Regular",Consolas,"Liberation Mono",Menlo,monospace;font-size:14px;line-height:1.6;border:none;outline:none;resize:vertical;border-radius:12px;color:var(--text);background:var(--card)}
+
 @media(max-width:640px){
   .wrapper{padding:0 8px 32px;margin:12px auto}
   .md-card{padding:20px 16px;border-radius:8px}
@@ -937,22 +966,50 @@ a:hover{text-decoration:underline}
     <span class="header-title">%s</span>
   </div>
   <div class="header-right">
-    <a href="%s" class="btn-back">← 返回</a>
+    <a href="%s" id="btn-back" class="btn-back">← 返回</a>
+    <button id="btn-edit" class="btn-edit" onclick="startEdit()">✏️ 编辑</button>
+    <button id="btn-save" class="btn-save" style="display:none" onclick="document.getElementById('edit-form').submit()">💾 保存</button>
+    <button id="btn-cancel" class="btn-cancel" style="display:none" onclick="cancelEdit()">✕ 取消</button>
     <a href="/logout" class="btn-logout">退出</a>
   </div>
 </header>
 <div class="wrapper">
-  <div class="md-card">
+  <div id="preview-card" class="md-card">
     <article class="md-body">
 %s
     </article>
   </div>
+  <form id="edit-form" method="POST" action="%s" class="edit-card">
+    <textarea id="md-editor" name="content" class="md-editor" spellcheck="false">%s</textarea>
+  </form>
 </div>
+<script>
+function startEdit(){
+  document.getElementById('preview-card').style.display='none';
+  var ef=document.getElementById('edit-form');
+  ef.style.display='flex';
+  document.getElementById('md-editor').focus();
+  document.getElementById('btn-edit').style.display='none';
+  document.getElementById('btn-back').style.display='none';
+  document.getElementById('btn-save').style.display='';
+  document.getElementById('btn-cancel').style.display='';
+}
+function cancelEdit(){
+  document.getElementById('preview-card').style.display='';
+  document.getElementById('edit-form').style.display='none';
+  document.getElementById('btn-edit').style.display='';
+  document.getElementById('btn-back').style.display='';
+  document.getElementById('btn-save').style.display='none';
+  document.getElementById('btn-cancel').style.display='none';
+}
+</script>
 </body></html>`,
 		html.EscapeString(fileName),
 		html.EscapeString(fileName),
 		parentURL,
 		rendered.String(),
+		editActionURL,
+		escapedSource,
 	)
 }
 
@@ -973,6 +1030,86 @@ func serveDownload(w http.ResponseWriter, r *http.Request, absPath string) {
 	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename*=UTF-8''%s`, fileName))
 	w.Header().Set("Content-Type", "application/octet-stream")
 	http.ServeFile(w, r, absPath)
+}
+
+// maxMarkdownEditBytes caps the size of an edited markdown file at 10 MiB.
+const maxMarkdownEditBytes = 10 << 20
+
+// saveMarkdown writes the edited markdown content back to disk atomically, then
+// redirects to the preview page.
+func saveMarkdown(w http.ResponseWriter, r *http.Request, absPath, relPath string) {
+	r.Body = http.MaxBytesReader(w, r.Body, maxMarkdownEditBytes)
+	if err := r.ParseForm(); err != nil {
+		var maxBytesErr *http.MaxBytesError
+		if errors.As(err, &maxBytesErr) {
+			http.Error(w, "Content too large", http.StatusRequestEntityTooLarge)
+		} else {
+			http.Error(w, "Bad request", http.StatusBadRequest)
+		}
+		return
+	}
+	content := r.FormValue("content")
+	if int64(len(content)) > maxMarkdownEditBytes {
+		http.Error(w, "Content too large", http.StatusRequestEntityTooLarge)
+		return
+	}
+
+	// Use Lstat so we see the symlink itself rather than its target; reject symlinks
+	// to prevent writing outside cfgDirectory via a symlink planted inside it.
+	info, err := os.Lstat(absPath)
+	if err != nil {
+		http.Error(w, "File not found", http.StatusNotFound)
+		return
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		http.Error(w, "Cannot save file", http.StatusBadRequest)
+		return
+	}
+
+	// Atomic write: write to a sibling temp file, sync, then rename into place.
+	dir := filepath.Dir(absPath)
+	tmp, err := os.CreateTemp(dir, ".md-edit-*")
+	if err != nil {
+		http.Error(w, "Cannot save file", http.StatusInternalServerError)
+		return
+	}
+	tmpName := tmp.Name()
+	// Ensure temp file is cleaned up on any early exit.
+	committed := false
+	defer func() {
+		if !committed {
+			os.Remove(tmpName)
+		}
+	}()
+	if _, err := tmp.WriteString(content); err != nil {
+		tmp.Close()
+		http.Error(w, "Cannot save file", http.StatusInternalServerError)
+		return
+	}
+	if err := tmp.Sync(); err != nil {
+		tmp.Close()
+		http.Error(w, "Cannot save file", http.StatusInternalServerError)
+		return
+	}
+	if err := tmp.Chmod(info.Mode()); err != nil {
+		tmp.Close()
+		http.Error(w, "Cannot save file", http.StatusInternalServerError)
+		return
+	}
+	tmp.Close()
+	if err := os.Rename(tmpName, absPath); err != nil {
+		http.Error(w, "Cannot save file", http.StatusInternalServerError)
+		return
+	}
+	committed = true
+
+	var redirectURL string
+	if relPath == "" {
+		redirectURL = "/"
+	} else {
+		redirectURL = "/" + urlEncodePath(relPath)
+	}
+	http.Redirect(w, r, redirectURL, http.StatusSeeOther)
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
