@@ -596,7 +596,7 @@ a:hover{text-decoration:underline}
 				actionBtn = `<div class="action-btns">` +
 					`<a href="` + hrefPath + `?download=1" class="btn-dl" title="下载">⬇</a>` +
 					`<form method="POST" action="` + hrefPath + `?delete=1" style="display:contents">` +
-					`<button type="submit" class="btn-del" title="删除" aria-label="删除" data-name="` + escapedName + `" onclick="return confirm('确定要删除文件 &quot;'+this.dataset.name+'&quot; 吗？此操作不可撤销！')">🗑</button>` +
+					`<button type="submit" class="btn-del" title="删除" aria-label="删除" data-name="` + escapedName + `" onclick='return confirm("确定要删除文件 \""+this.dataset.name+"\" 吗？此操作不可撤销！")'>🗑</button>` +
 					`</form></div>`
 			}
 
