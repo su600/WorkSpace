@@ -53,6 +53,9 @@ const (
 	searchMaxResults    = 500
 )
 
+// faviconSVG is the inline SVG icon served at /favicon.svg and referenced by all pages.
+const faviconSVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><rect width="32" height="32" rx="6" fill="#1a73e8"/><text x="16" y="22" text-anchor="middle" font-family="sans-serif" font-size="18" font-weight="bold" fill="white">W</text></svg>`
+
 func generateToken() string {
 	b := make([]byte, 32)
 	if _, err := rand.Read(b); err != nil {
@@ -149,7 +152,7 @@ func main() {
 	mux.HandleFunc("/search", searchHandler)
 	mux.HandleFunc("/", handler)
 	addr := ":" + cfgPort
-	log.Printf("🚀 Workspace Portal running at http://localhost%s  dir=%s", addr, cfgDirectory)
+	log.Printf("🚀 WorkSpace Portal running at http://localhost%s  dir=%s", addr, cfgDirectory)
 	srv := &http.Server{
 		Addr:              addr,
 		Handler:           mux,
@@ -273,6 +276,14 @@ func handler(w http.ResponseWriter, r *http.Request) {
 			SameSite: http.SameSiteLaxMode,
 		})
 		http.Redirect(w, r, "/login", http.StatusSeeOther)
+		return
+	}
+
+	// Favicon — served without auth so browsers can display it on the login page too
+	if r.URL.Path == "/favicon.svg" {
+		w.Header().Set("Content-Type", "image/svg+xml")
+		w.Header().Set("Cache-Control", "public, max-age=86400")
+		fmt.Fprint(w, faviconSVG)
 		return
 	}
 
@@ -441,7 +452,10 @@ func searchHandler(w http.ResponseWriter, r *http.Request) {
 	sb.WriteString(`<!DOCTYPE html><html lang="zh-CN"><head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>🔍 搜索 — Workspace</title>
+<meta name="theme-color" content="#1a73e8">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/favicon.svg">
+<title>🔍 搜索 — WorkSpace</title>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 :root{--blue:#1a73e8;--blue-dark:#1558b0;--bg:#f0f2f5;--card:#fff;--border:#e8eaed;--text:#202124;--muted:#5f6368;--hover:#f8f9fa}
@@ -449,16 +463,16 @@ body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Oxygen,Ubunt
 a{color:var(--blue);text-decoration:none}
 a:hover{text-decoration:underline}
 .header{background:linear-gradient(135deg,#1a73e8,#0d47a1);color:#fff;padding:0 16px;height:56px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:100;box-shadow:0 2px 8px rgba(0,0,0,.2)}
-.header-left{display:flex;align-items:center;gap:10px;overflow:hidden}
+.header-left{display:flex;align-items:center;gap:8px;flex-shrink:0}
 .header-logo{font-size:20px;flex-shrink:0}
-.header-right{display:flex;align-items:center;gap:8px;flex-shrink:0}
-.btn-logout{color:#fff;background:rgba(255,255,255,.2);border:1px solid rgba(255,255,255,.3);padding:5px 12px;border-radius:20px;font-size:12px;cursor:pointer;transition:background .15s}
+.header-brand{font-size:15px;font-weight:700;letter-spacing:.5px;white-space:nowrap}
+.header-right{display:flex;align-items:center;gap:8px;flex:1;justify-content:flex-end;min-width:0}
+.btn-logout{color:#fff;background:rgba(255,255,255,.2);border:1px solid rgba(255,255,255,.3);padding:5px 12px;border-radius:20px;font-size:12px;cursor:pointer;transition:background .15s;white-space:nowrap;flex-shrink:0}
 .btn-logout:hover{background:rgba(255,255,255,.3);text-decoration:none}
-.search-bar{display:flex;align-items:center;gap:8px;background:rgba(255,255,255,.15);border:1px solid rgba(255,255,255,.3);border-radius:24px;padding:4px 12px;flex:1;max-width:480px;margin:0 12px}
-.search-bar input{background:none;border:none;outline:none;color:#fff;font-size:14px;width:100%}
+.search-bar{display:flex;align-items:center;gap:8px;background:rgba(255,255,255,.15);border:1px solid rgba(255,255,255,.3);border-radius:24px;padding:4px 12px;max-width:480px;flex:1;min-width:0}
+.search-bar input{background:none;border:none;outline:none;color:#fff;font-size:14px;width:100%;min-width:0}
 .search-bar input::placeholder{color:rgba(255,255,255,.7)}
-.search-bar button{background:none;border:none;color:#fff;cursor:pointer;font-size:14px;padding:0;line-height:1}
-.search-bar--compact{flex:none;max-width:220px;margin:0 8px}
+.search-bar button{background:none;border:none;color:#fff;cursor:pointer;font-size:14px;padding:0;line-height:1;flex-shrink:0}
 .container{max-width:1200px;margin:12px auto;padding:0 12px 24px}
 .card{background:var(--card);border-radius:12px;box-shadow:0 1px 4px rgba(0,0,0,.08);overflow:hidden}
 .card-header{padding:14px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px}
@@ -488,17 +502,18 @@ a:hover{text-decoration:underline}
 .hint-text{font-size:14px}
 @media(max-width:640px){
   .file-table thead{display:none}
-  .file-table,.file-table tbody,.file-table tr,.file-table td{display:block;width:100%}
-  .file-table tr{padding:10px 16px;border-top:1px solid var(--border);display:flex;flex-wrap:wrap;gap:4px;align-items:center}
+  .file-table,.file-table tbody,.file-table tr{display:block;width:100%}
+  .file-table tr{padding:8px 12px;border-top:1px solid var(--border);display:flex;flex-wrap:wrap;gap:2px 8px;align-items:center}
   .file-table tr:hover{background:var(--hover)}
-  .file-table td{padding:0;border:none;font-size:13px}
-  .col-name{width:100%;order:1}
-  .col-path{width:100%;order:2}
-  .col-size{order:3;margin-left:auto;text-align:right}
-  .col-mtime{order:4;font-size:12px}
+  .file-table td{padding:0;border:none;font-size:13px;display:inline-flex;align-items:center}
+  .col-name{width:100%;order:1;display:flex}
+  .col-path{width:100%;order:2;font-size:12px}
+  .col-size{order:3;color:var(--muted);font-size:12px}
+  .col-mtime{order:4;font-size:12px;flex:1;text-align:right;justify-content:flex-end}
   .col-action{order:5;margin-left:8px}
-  .search-bar{max-width:none;margin:0 4px}
+  .search-bar{max-width:none}
   .container{padding:0 8px 24px}
+  .header-brand{display:none}
 }
 </style>
 </head>
@@ -506,13 +521,14 @@ a:hover{text-decoration:underline}
 <header class="header">
   <div class="header-left">
     <span class="header-logo">🚀</span>
+    <span class="header-brand">WorkSpace</span>
   </div>
-  <form class="search-bar" action="/search" method="GET">
-    <span>🔍</span>
-    <input type="text" name="q" placeholder="搜索文件名…" value="` + html.EscapeString(query) + `" autofocus>
-    <button type="submit">搜索</button>
-  </form>
   <div class="header-right">
+    <form class="search-bar" action="/search" method="GET">
+      <span>🔍</span>
+      <input type="text" name="q" placeholder="搜索文件名…" value="` + html.EscapeString(query) + `" autofocus>
+      <button type="submit">搜索</button>
+    </form>
     <a href="/" class="btn-logout">🏠 根目录</a>
     <a href="/logout" class="btn-logout">退出登录</a>
   </div>
@@ -681,7 +697,10 @@ func listDirectory(w http.ResponseWriter, r *http.Request, absPath, relPath stri
 	sb.WriteString(`<!DOCTYPE html><html lang="zh-CN"><head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>🚀 Workspace — /` + html.EscapeString(relPath) + `</title>
+<meta name="theme-color" content="#1a73e8">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/favicon.svg">
+<title>🚀 WorkSpace — /` + html.EscapeString(relPath) + `</title>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 :root{--blue:#1a73e8;--blue-dark:#1558b0;--bg:#f0f2f5;--card:#fff;--border:#e8eaed;--text:#202124;--muted:#5f6368;--hover:#f8f9fa}
@@ -691,17 +710,17 @@ a:hover{text-decoration:underline}
 
 /* Header */
 .header{background:linear-gradient(135deg,#1a73e8,#0d47a1);color:#fff;padding:0 16px;height:56px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:100;box-shadow:0 2px 8px rgba(0,0,0,.2)}
-.header-left{display:flex;align-items:center;gap:10px;overflow:hidden}
+.header-left{display:flex;align-items:center;gap:8px;flex-shrink:0}
 .header-logo{font-size:20px;flex-shrink:0}
-.header-title{font-size:15px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.header-right{display:flex;align-items:center;gap:8px;flex-shrink:0}
-.btn-logout{color:#fff;background:rgba(255,255,255,.2);border:1px solid rgba(255,255,255,.3);padding:5px 12px;border-radius:20px;font-size:12px;cursor:pointer;transition:background .15s}
+.header-brand{font-size:15px;font-weight:700;letter-spacing:.5px;white-space:nowrap}
+.header-title{font-size:13px;opacity:.85;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:200px}
+.header-right{display:flex;align-items:center;gap:8px;flex:1;justify-content:flex-end;min-width:0}
+.btn-logout{color:#fff;background:rgba(255,255,255,.2);border:1px solid rgba(255,255,255,.3);padding:5px 12px;border-radius:20px;font-size:12px;cursor:pointer;transition:background .15s;white-space:nowrap;flex-shrink:0}
 .btn-logout:hover{background:rgba(255,255,255,.3);text-decoration:none}
-.search-bar{display:flex;align-items:center;gap:8px;background:rgba(255,255,255,.15);border:1px solid rgba(255,255,255,.3);border-radius:24px;padding:4px 12px;flex:1;max-width:480px;margin:0 12px}
-.search-bar input{background:none;border:none;outline:none;color:#fff;font-size:14px;width:100%}
+.search-bar{display:flex;align-items:center;gap:8px;background:rgba(255,255,255,.15);border:1px solid rgba(255,255,255,.3);border-radius:24px;padding:4px 12px;max-width:280px;flex:1;min-width:0}
+.search-bar input{background:none;border:none;outline:none;color:#fff;font-size:14px;width:100%;min-width:0}
 .search-bar input::placeholder{color:rgba(255,255,255,.7)}
-.search-bar button{background:none;border:none;color:#fff;cursor:pointer;font-size:14px;padding:0;line-height:1}
-.search-bar--compact{flex:none;max-width:220px;margin:0 8px}
+.search-bar button{background:none;border:none;color:#fff;cursor:pointer;font-size:14px;padding:0;line-height:1;flex-shrink:0}
 
 /* Breadcrumb */
 .breadcrumb{padding:12px 16px 0;display:flex;flex-wrap:wrap;gap:4px;align-items:center;font-size:13px;color:var(--muted)}
@@ -716,6 +735,9 @@ a:hover{text-decoration:underline}
 .card-header{padding:14px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px}
 .card-header-title{font-size:14px;font-weight:600;color:var(--muted)}
 .file-count{font-size:12px;color:var(--muted);background:#f1f3f4;padding:2px 8px;border-radius:10px}
+
+/* Mobile sort bar — hidden on desktop */
+.mobile-sort-bar{display:none}
 
 /* Table */
 .file-table{width:100%;border-collapse:collapse}
@@ -741,17 +763,28 @@ a:hover{text-decoration:underline}
 
 /* Mobile cards view */
 @media(max-width:640px){
-  .file-table thead{display:none}
-  .file-table,.file-table tbody,.file-table tr,.file-table td{display:block;width:100%}
-  .file-table tr{padding:10px 16px;border-top:1px solid var(--border);display:flex;flex-wrap:wrap;gap:4px;align-items:center}
-  .file-table tr:hover{background:var(--hover)}
-  .file-table td{padding:0;border:none;font-size:13px}
-  .file-table .col-name{width:100%;order:1}
-  .file-table .col-size{order:2;margin-left:auto;text-align:right}
-  .file-table .col-mtime{order:3;font-size:12px}
-  .file-table .col-action{order:4;margin-left:8px}
-  .header-title{font-size:13px}
+  .header-brand{display:none}
+  .header-title{max-width:140px}
+  .search-bar{max-width:160px}
+  .btn-logout{padding:5px 8px}
   .container{padding:0 8px 24px}
+
+  /* Mobile sort bar */
+  .mobile-sort-bar{display:flex;align-items:center;gap:6px;padding:8px 12px;border-bottom:1px solid var(--border);font-size:12px;color:var(--muted);flex-wrap:wrap;background:#fafafa}
+  .sort-chip{padding:3px 10px;border:1px solid var(--border);border-radius:10px;color:var(--muted);font-size:12px;background:var(--card);white-space:nowrap}
+  .sort-chip--active{border-color:var(--blue);color:var(--blue);background:#e8f0fe;font-weight:600}
+  .sort-chip:hover{text-decoration:none;border-color:var(--blue);color:var(--blue)}
+
+  /* Hide thead, render rows as cards */
+  .file-table thead{display:none}
+  .file-table,.file-table tbody,.file-table tr{display:block;width:100%}
+  .file-table tr{padding:8px 12px;border-top:1px solid var(--border);display:flex;flex-wrap:wrap;gap:2px 8px;align-items:center}
+  .file-table tr:hover{background:var(--hover)}
+  .file-table td{padding:0;border:none;font-size:13px;display:inline-flex;align-items:center}
+  .file-table .col-name{width:100%;order:1;display:flex}
+  .file-table .col-size{order:2;color:var(--muted);font-size:12px}
+  .file-table .col-mtime{order:3;font-size:12px;flex:1;justify-content:flex-end;text-align:right}
+  .file-table .col-action{order:4;margin-left:8px}
 }
 
 /* Empty state */
@@ -764,14 +797,15 @@ a:hover{text-decoration:underline}
 <header class="header">
   <div class="header-left">
     <span class="header-logo">🚀</span>
+    <span class="header-brand">WorkSpace</span>
     <span class="header-title">` + html.EscapeString("/"+relPath) + `</span>
   </div>
-  <form class="search-bar search-bar--compact" action="/search" method="GET">
-    <span>🔍</span>
-    <input type="text" name="q" placeholder="搜索文件名…">
-    <button type="submit">搜</button>
-  </form>
   <div class="header-right">
+    <form class="search-bar" action="/search" method="GET">
+      <span>🔍</span>
+      <input type="text" name="q" placeholder="搜索文件名…">
+      <button type="submit">搜</button>
+    </form>
     <a href="/logout" class="btn-logout">退出登录</a>
   </div>
 </header>
@@ -795,6 +829,19 @@ a:hover{text-decoration:underline}
 
 	sb.WriteString(`<div class="container"><div class="card">`)
 	sb.WriteString(`<div class="card-header"><span class="card-header-title">📂 文件列表</span><span class="file-count">` + fmt.Sprintf("%d 项", len(files)) + `</span></div>`)
+
+	// Mobile sort bar — visible only on small screens since the table header is hidden there
+	mobileSortBar := `<div class="mobile-sort-bar"><span>排序:</span>`
+	for _, f := range []struct{ field, label string }{{"name", "名称"}, {"size", "大小"}, {"mtime", "修改时间"}} {
+		cls := "sort-chip"
+		if sortBy == f.field {
+			cls += " sort-chip--active"
+		}
+		mobileSortBar += `<a href="` + sortLink(f.field) + `" class="` + cls + `">` + f.label + sortIndicator(f.field) + `</a>`
+	}
+	mobileSortBar += `</div>`
+	sb.WriteString(mobileSortBar)
+
 	sb.WriteString(`<table class="file-table"><thead><tr>`)
 	sb.WriteString(`<th class="col-name"><a href="` + sortLink("name") + `">名称` + sortIndicator("name") + `</a></th>`)
 	sb.WriteString(`<th class="col-size"><a href="` + sortLink("size") + `">大小` + sortIndicator("size") + `</a></th>`)
@@ -912,7 +959,10 @@ func renderMarkdown(w http.ResponseWriter, absPath, relPath string) {
 	fmt.Fprintf(w, `<!DOCTYPE html><html lang="zh-CN"><head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>%s — Workspace</title>
+<meta name="theme-color" content="#1a73e8">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/favicon.svg">
+<title>%s — WorkSpace</title>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 :root{--blue:#1a73e8;--bg:#f0f2f5;--card:#fff;--border:#e8eaed;--text:#202124;--muted:#5f6368;--code-bg:#f6f8fa}
@@ -922,9 +972,10 @@ a:hover{text-decoration:underline}
 
 /* Header */
 .header{background:linear-gradient(135deg,#1a73e8,#0d47a1);color:#fff;padding:0 16px;height:56px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:100;box-shadow:0 2px 8px rgba(0,0,0,.2)}
-.header-left{display:flex;align-items:center;gap:10px;overflow:hidden}
+.header-left{display:flex;align-items:center;gap:8px;flex-shrink:0}
 .header-logo{font-size:20px;flex-shrink:0}
-.header-title{font-size:14px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;opacity:.9}
+.header-brand{font-size:15px;font-weight:700;letter-spacing:.5px;white-space:nowrap}
+.header-title{font-size:13px;opacity:.85;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:200px}
 .header-right{display:flex;align-items:center;gap:8px;flex-shrink:0}
 .btn-back{color:#fff;background:rgba(255,255,255,.2);border:1px solid rgba(255,255,255,.3);padding:5px 12px;border-radius:20px;font-size:12px;transition:background .15s;white-space:nowrap}
 .btn-back:hover{background:rgba(255,255,255,.3);text-decoration:none}
@@ -980,7 +1031,8 @@ a:hover{text-decoration:underline}
   .md-body{font-size:14px}
   .md-body h1{font-size:1.6em}
   .md-body h2{font-size:1.3em}
-  .header-title{display:none}
+  .header-brand{display:none}
+  .header-title{max-width:120px}
 }
 </style>
 </head>
@@ -988,6 +1040,7 @@ a:hover{text-decoration:underline}
 <header class="header">
   <div class="header-left">
     <span class="header-logo">📄</span>
+    <span class="header-brand">WorkSpace</span>
     <span class="header-title">%s</span>
   </div>
   <div class="header-right">
