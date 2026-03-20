@@ -325,14 +325,32 @@ func handler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Handle POST requests for MD file editing
-	if _, ok := query["edit"]; ok && r.Method == http.MethodPost {
-		if !info.IsDir() && strings.HasSuffix(strings.ToLower(absPath), ".md") {
-			saveMarkdown(w, r, absPath, relPath)
+	// Handle file deletion — POST only to avoid accidental deletions via GET
+	if r.Method == http.MethodPost {
+		if _, ok := query["delete"]; ok {
+			if info.IsDir() {
+				http.Error(w, "Cannot delete directories", http.StatusBadRequest)
+				return
+			}
+			if err := os.Remove(absPath); err != nil {
+				log.Printf("delete %q: %v", absPath, err)
+				http.Error(w, "Cannot delete file", http.StatusInternalServerError)
+				return
+			}
+			// Redirect to the parent directory after deletion
+			parent := path.Dir(relPath)
+			if parent == "." {
+				parent = ""
+			}
+			var redirectURL string
+			if parent == "" {
+				redirectURL = "/"
+			} else {
+				redirectURL = "/" + urlEncodePath(parent)
+			}
+			http.Redirect(w, r, redirectURL, http.StatusSeeOther)
 			return
 		}
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
 	}
 
 	if info.IsDir() {
@@ -709,7 +727,7 @@ a:hover{text-decoration:underline}
 .file-table .col-name{min-width:160px}
 .file-table .col-size{width:90px;text-align:right;color:var(--muted)}
 .file-table .col-mtime{width:130px;color:var(--muted)}
-.file-table .col-action{width:60px;text-align:center}
+.file-table .col-action{width:120px;text-align:center}
 .file-name{display:flex;align-items:center;gap:8px}
 .file-icon{font-size:18px;flex-shrink:0;line-height:1}
 .file-link{font-weight:500;color:var(--text)}
@@ -717,6 +735,9 @@ a:hover{text-decoration:underline}
 .dir-link{color:var(--blue) !important}
 .btn-dl{display:inline-flex;align-items:center;gap:3px;padding:4px 10px;border:1px solid var(--border);border-radius:6px;color:var(--muted);font-size:12px;transition:all .15s;background:var(--card)}
 .btn-dl:hover{border-color:var(--blue);color:var(--blue);background:#e8f0fe;text-decoration:none}
+.btn-del{display:inline-flex;align-items:center;padding:4px 8px;border:1px solid var(--border);border-radius:6px;color:var(--muted);font-size:12px;transition:all .15s;background:var(--card);cursor:pointer;line-height:1}
+.btn-del:hover{border-color:#d93025;color:#d93025;background:#fce8e6}
+.action-btns{display:flex;gap:6px;justify-content:center;align-items:center}
 
 /* Mobile cards view */
 @media(max-width:640px){
@@ -816,7 +837,11 @@ a:hover{text-decoration:underline}
 			} else {
 				icon = fileIcon(f.Name)
 				sizeStr = humanSize(f.Size)
-				actionBtn = `<a href="` + hrefPath + `?download=1" class="btn-dl" title="下载">⬇</a>`
+				actionBtn = `<div class="action-btns">` +
+					`<a href="` + hrefPath + `?download=1" class="btn-dl" title="下载">⬇</a>` +
+					`<form method="POST" action="` + hrefPath + `?delete=1" style="display:contents">` +
+					`<button type="submit" class="btn-del" title="删除" aria-label="删除" data-name="` + escapedName + `" onclick='return confirm("确定要删除文件 \""+this.dataset.name+"\" 吗？此操作不可撤销！")'>🗑</button>` +
+					`</form></div>`
 			}
 
 			mtimeStr := f.Mtime.Format(mtimeFormat)
