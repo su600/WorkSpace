@@ -4,3 +4,4 @@ workspace-portal.exe
 
 # Go test cache
 *.test
+nohup.out
