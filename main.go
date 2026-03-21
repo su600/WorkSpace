@@ -56,6 +56,11 @@ const (
 // faviconSVG is the inline SVG icon served at /favicon.svg and referenced by all pages.
 const faviconSVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><rect width="32" height="32" rx="6" fill="#1a73e8"/><text x="16" y="22" text-anchor="middle" font-family="sans-serif" font-size="18" font-weight="bold" fill="white">W</text></svg>`
 
+// touchIconPNG is a base64-encoded 180×180 PNG served at /apple-touch-icon.png.
+// It contains the same "W" monogram on #1a73e8 blue, which iOS Safari uses for
+// home-screen and PWA icons (SVG is not supported there).
+const touchIconPNG = "iVBORw0KGgoAAAANSUhEUgAAALQAAAC0CAIAAACyr5FlAAABoElEQVR42u3SwQ0AIAgEQftvGivwQzRBmG1AucxakiRJkiRJkiRJkiRJkiRJkiRJkiRJkiRJkqoX55wMBxxwWAoOSznZUk62lJMt5WRLOdlSTraUk+FwMhxwwGEpOCzlZEs52VJOtpSTLeVkSznZUk62lJPhgENwwGEpJ1vKyZZysqWcbCknW8rJlnKypZwMBxxwwAGHpeCwlJMt5eRmS+Xeuv5DOOCAAw444IADDjjggAMOOOCAAw444IBDcMABBxxwwAEHHHDAAQcccMABBxxwwAEHHHDAAQcccMABBxxwwAEHHHDAAcdwHAO1wQEHHHAIDjjggAMOOOCAAw444IADDjjggAMOOOCAQ3DAAQcccMABBxxwwPEjjvr7Rioe4IADDjjggAMOOOCAAw444IADDjjggAMOOAQHHHDAAQcccMABBxxwwAEHHM1wdB0RDjjggAMOOOCAAw444IADDjjggAMOOOAQHHDAAQcccMABBxxwwAEHHHDAAcccHMaBAw7BITgEh+AQHIJDcEiSJEmSJEmSJEmSJEmSJEmSpNdtNVeqiN/OUH4AAAAASUVORK5CYII="
+
 func generateToken() string {
 	b := make([]byte, 32)
 	if _, err := rand.Read(b); err != nil {
@@ -287,6 +292,18 @@ func handler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if r.URL.Path == "/apple-touch-icon.png" {
+		pngData, err := base64.StdEncoding.DecodeString(touchIconPNG)
+		if err != nil {
+			http.Error(w, "icon unavailable", http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "image/png")
+		w.Header().Set("Cache-Control", "public, max-age=86400")
+		w.Write(pngData) //nolint:errcheck
+		return
+	}
+
 	// All other endpoints require authentication
 	if !validateSession(r) {
 		next := r.URL.RequestURI()
@@ -454,7 +471,7 @@ func searchHandler(w http.ResponseWriter, r *http.Request) {
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="theme-color" content="#1a73e8">
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
-<link rel="apple-touch-icon" href="/favicon.svg">
+<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
 <title>🔍 搜索 — WorkSpace</title>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
@@ -699,7 +716,7 @@ func listDirectory(w http.ResponseWriter, r *http.Request, absPath, relPath stri
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="theme-color" content="#1a73e8">
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
-<link rel="apple-touch-icon" href="/favicon.svg">
+<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
 <title>🚀 WorkSpace — /` + html.EscapeString(relPath) + `</title>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
@@ -961,7 +978,7 @@ func renderMarkdown(w http.ResponseWriter, absPath, relPath string) {
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="theme-color" content="#1a73e8">
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
-<link rel="apple-touch-icon" href="/favicon.svg">
+<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
 <title>%s — WorkSpace</title>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
