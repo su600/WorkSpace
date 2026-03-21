@@ -61,6 +61,54 @@ const faviconSVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
 // home-screen and PWA icons (SVG is not supported there).
 const touchIconPNG = "iVBORw0KGgoAAAANSUhEUgAAALQAAAC0CAIAAACyr5FlAAABoElEQVR42u3SwQ0AIAgEQftvGivwQzRBmG1AucxakiRJkiRJkiRJkiRJkiRJkiRJkiRJkiRJkqoX55wMBxxwWAoOSznZUk62lJMt5WRLOdlSTraUk+FwMhxwwGEpOCzlZEs52VJOtpSTLeVkSznZUk62lJPhgENwwGEpJ1vKyZZysqWcbCknW8rJlnKypZwMBxxwwAGHpeCwlJMt5eRmS+Xeuv5DOOCAAw444IADDjjggAMOOOCAAw444IBDcMABBxxwwAEHHHDAAQcccMABBxxwwAEHHHDAAQcccMABBxxwwAEHHHDAAcdwHAO1wQEHHHAIDjjggAMOOOCAAw444IADDjjggAMOOOCAQ3DAAQcccMABBxxwwPEjjvr7Rioe4IADDjjggAMOOOCAAw444IADDjjggAMOOAQHHHDAAQcccMABBxxwwAEHHM1wdB0RDjjggAMOOOCAAw444IADDjjggAMOOOAQHHDAAQcccMABBxxwwAEHHHDAAcccHMaBAw7BITgEh+AQHIJDcEiSJEmSJEmSJEmSJEmSJEmSpNdtNVeqiN/OUH4AAAAASUVORK5CYII="
 
+// icon192PNG is a base64-encoded 192×192 PNG icon required by Android PWA.
+const icon192PNG = "iVBORw0KGgoAAAANSUhEUgAAAMAAAADACAYAAABS3GwHAAADBUlEQVR42u3bwRHCMAxEUdVBmzRNFzAc0kGMx/yXmb1bK71jZjZ/j+frLd1M4bNoSeGwPEmCsCRJQrAUSUKwBMlCULxkEShckgiULFkIipUsAoVKFoEiJY1AiZIFoEDJIlCcZBEoTNIIlCVZAIqSNAIlSRaAgiSNQDmSBaAYSSNQigAgAoBIDIBCJI1AGQKACAAiACzPnZ9F7svpewRAAABA0gAUJ+U9AiAAKE4AUJwAoDgBQHECgOIEAMUJAIoTABQnAChOAFCcAKA4AQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAADgNgRgAchxkBcBxmBMBxmBEAx2FGAByHGQFwHGYEwHGYEQDHYUYAHIcZAXAcZgTAcZgRAMdhRgAchxkBcBxmBMBxmBEAx2FGAByHGQFwHGYEYFFx3gUAAN4FAADeBQAA3gUAAN4FAADeBYCFehcAFupdAFiodwFgod4FgIV6FwAW6l0AWKh3AWCh3gWAhXoXABbqXQBYqHcBYKHeBYCFehcAi4r7hyXoHgAAdA8AALoHAADdAwCA7gEAQPcAAKB7AADQPQAA6B4AAHQPAAC6BwAA3QMAgO4BAED3AACgewAA0D0AAOgeAAB0DwAAuvdPsNgjAGKPAIg9AiD2CIDYIwBijwAIAIoTABQnAChOAFCcAKA4AUBxAoDiBADFCQCKEwAUJwAoTgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAADgxwC+n+KkuMe5PsUJACKxACAAACAAKEMAEIkCgEDSxw+AAKAUAUAkCgACSR8/AJIHAIGkjx8AyQOAQNLHD4DkAUAg6eOHQPLHD4Hkjx8AyQOAQNLHD4Hkjx8CyR8/CJI/fAjE8UMgjh8EcfggiMMHQRw+EOLg4ZDzjvwDELyg+eSS48AAAAAASUVORK5CYII="
+
+// icon512PNG is a base64-encoded 512×512 PNG icon required by Android PWA.
+const icon512PNG = "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"
+
+// manifestJSON is the embedded PWA web app manifest served at /manifest.json.
+// It declares 192×192 and 512×512 PNG icons with purpose "any maskable" so that
+// Android Chrome recognises the app as a proper installable PWA rather than a bookmark.
+const manifestJSON = `{
+  "name": "WorkSpace",
+  "short_name": "WorkSpace",
+  "description": "WorkSpace 文件管理门户",
+  "start_url": "/?source=pwa",
+  "display": "standalone",
+  "background_color": "#1a73e8",
+  "theme_color": "#1a73e8",
+  "orientation": "any",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "type": "image/svg+xml",
+      "sizes": "any"
+    },
+    {
+      "src": "/icon-192.png",
+      "type": "image/png",
+      "sizes": "192x192",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/icon-512.png",
+      "type": "image/png",
+      "sizes": "512x512",
+      "purpose": "any maskable"
+    }
+  ]
+}`
+
+// serviceWorkerJS is the embedded service worker script served at /sw.js.
+// It caches the app shell on install and serves cached responses on fetch failures,
+// ensuring the PWA can open even when the network is briefly unavailable.
+const serviceWorkerJS = `const CACHE='ws-v1';
+self.addEventListener('install',e=>{e.waitUntil(caches.open(CACHE).then(c=>c.add('/')));self.skipWaiting();});
+self.addEventListener('activate',e=>{e.waitUntil(caches.keys().then(ks=>Promise.all(ks.filter(k=>k!==CACHE).map(k=>caches.delete(k)))));self.clients.claim();});
+self.addEventListener('fetch',e=>{if(e.request.method!=='GET')return;e.respondWith(fetch(e.request).then(r=>{const rc=r.clone();caches.open(CACHE).then(c=>c.put(e.request,rc));return r;}).catch(()=>caches.match(e.request).then(r=>r||caches.match('/'))));});
+`
+
 func generateToken() string {
 	b := make([]byte, 32)
 	if _, err := rand.Read(b); err != nil {
@@ -304,21 +352,50 @@ func handler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if r.URL.Path == "/icon-192.png" {
+		pngData, err := base64.StdEncoding.DecodeString(icon192PNG)
+		if err != nil {
+			http.Error(w, "icon unavailable", http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "image/png")
+		w.Header().Set("Cache-Control", "public, max-age=86400")
+		w.Write(pngData) //nolint:errcheck
+		return
+	}
+
+	if r.URL.Path == "/icon-512.png" {
+		pngData, err := base64.StdEncoding.DecodeString(icon512PNG)
+		if err != nil {
+			http.Error(w, "icon unavailable", http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "image/png")
+		w.Header().Set("Cache-Control", "public, max-age=86400")
+		w.Write(pngData) //nolint:errcheck
+		return
+	}
+
+	// PWA manifest and service worker must be served without auth so that
+	// browsers can verify the PWA is installable before the user logs in.
+	if r.URL.Path == "/manifest.json" {
+		w.Header().Set("Content-Type", "application/manifest+json; charset=utf-8")
+		w.Header().Set("Cache-Control", "public, max-age=3600")
+		fmt.Fprint(w, manifestJSON)
+		return
+	}
+
+	if r.URL.Path == "/sw.js" {
+		w.Header().Set("Content-Type", "application/javascript; charset=utf-8")
+		w.Header().Set("Cache-Control", "no-cache")
+		fmt.Fprint(w, serviceWorkerJS)
+		return
+	}
+
 	// All other endpoints require authentication
 	if !validateSession(r) {
 		next := r.URL.RequestURI()
 		http.Redirect(w, r, "/login?next="+url.QueryEscape(next), http.StatusSeeOther)
-		return
-	}
-
-	// PWA static resources (served after auth)
-	if r.URL.Path == "/manifest.json" {
-		http.ServeFile(w, r, filepath.Join(cfgDirectory, "dashboard/manifest_workspace.json"))
-		return
-	}
-	if r.URL.Path == "/sw.js" {
-		w.Header().Set("Content-Type", "application/javascript; charset=utf-8")
-		http.ServeFile(w, r, filepath.Join(cfgDirectory, "dashboard/sw_workspace.js"))
 		return
 	}
 
@@ -470,6 +547,7 @@ func searchHandler(w http.ResponseWriter, r *http.Request) {
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="theme-color" content="#1a73e8">
+<link rel="manifest" href="/manifest.json">
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
 <title>🔍 搜索 — WorkSpace</title>
@@ -623,7 +701,7 @@ a:hover{text-decoration:underline}
 		sb.WriteString(`</tbody></table>`)
 	}
 
-	sb.WriteString(`</div></div></body></html>`)
+	sb.WriteString(`</div></div><script>if('serviceWorker' in navigator){navigator.serviceWorker.register('/sw.js').catch(function(){});}</script></body></html>`)
 	fmt.Fprint(w, sb.String())
 }
 
@@ -715,6 +793,7 @@ func listDirectory(w http.ResponseWriter, r *http.Request, absPath, relPath stri
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="theme-color" content="#1a73e8">
+<link rel="manifest" href="/manifest.json">
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
 <title>🚀 WorkSpace — /` + html.EscapeString(relPath) + `</title>
@@ -928,7 +1007,7 @@ a:hover{text-decoration:underline}
 		sb.WriteString(`</tbody></table>`)
 	}
 
-	sb.WriteString(`</div></div></body></html>`)
+	sb.WriteString(`</div></div><script>if('serviceWorker' in navigator){navigator.serviceWorker.register('/sw.js').catch(function(){});}</script></body></html>`)
 	fmt.Fprint(w, sb.String())
 }
 
@@ -977,6 +1056,7 @@ func renderMarkdown(w http.ResponseWriter, absPath, relPath string) {
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="theme-color" content="#1a73e8">
+<link rel="manifest" href="/manifest.json">
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
 <title>%s — WorkSpace</title>
@@ -1097,6 +1177,7 @@ function cancelEdit(){
   document.getElementById('btn-save').style.display='none';
   document.getElementById('btn-cancel').style.display='none';
 }
+if('serviceWorker' in navigator){navigator.serviceWorker.register('/sw.js').catch(function(){});}
 </script>
 </body></html>`,
 		html.EscapeString(fileName),
