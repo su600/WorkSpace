@@ -28,7 +28,6 @@ ENV PORTAL_PORT=3000 \
     PORTAL_DIR=/workspace \
     PORTAL_TLS=false
 
-# Mount point for the workspace directory
-VOLUME ["/workspace"]
-
+# At runtime, mount a host directory or volume at /workspace, for example:
+# docker run -v /host/workspace:/workspace -p 3000:3000 image-name
 ENTRYPOINT ["/workspace-portal"]
