@@ -101,13 +101,86 @@ const manifestJSON = `{
 }`
 
 // serviceWorkerJS is the embedded service worker script served at /sw.js.
-// It caches the app shell on install and serves cached responses on fetch failures,
-// ensuring the PWA can open even when the network is briefly unavailable.
-const serviceWorkerJS = `const CACHE='ws-v1';
-self.addEventListener('install',e=>{e.waitUntil(caches.open(CACHE).then(c=>c.add('/')));self.skipWaiting();});
-self.addEventListener('activate',e=>{e.waitUntil(caches.keys().then(ks=>Promise.all(ks.filter(k=>k!==CACHE).map(k=>caches.delete(k)))));self.clients.claim();});
-self.addEventListener('fetch',e=>{if(e.request.method!=='GET')return;e.respondWith(fetch(e.request).then(r=>{const rc=r.clone();caches.open(CACHE).then(c=>c.put(e.request,rc));return r;}).catch(()=>caches.match(e.request).then(r=>r||caches.match('/'))));});
+// It pre-caches a small set of public app-shell assets on install and serves
+// cached responses for those assets on network failure.  Dynamic and authenticated
+// pages are never stored in the cache to avoid leaking user content.
+const serviceWorkerJS = `const CACHE = 'ws-v1';
+const APP_SHELL = [
+  '/login',
+  '/manifest.json',
+  '/sw.js',
+  '/favicon.svg',
+  '/icon-192.png',
+  '/icon-512.png',
+  '/apple-touch-icon.png',
+];
+
+self.addEventListener('install', event => {
+  event.waitUntil(caches.open(CACHE).then(cache => cache.addAll(APP_SHELL)));
+  self.skipWaiting();
+});
+
+self.addEventListener('activate', event => {
+  event.waitUntil(
+    caches.keys().then(keys =>
+      Promise.all(keys.filter(k => k !== CACHE).map(k => caches.delete(k)))
+    )
+  );
+  self.clients.claim();
+});
+
+self.addEventListener('fetch', event => {
+  if (event.request.method !== 'GET') return;
+
+  const url = new URL(event.request.url);
+  if (url.origin !== self.location.origin) return;
+
+  const isShell = APP_SHELL.includes(url.pathname);
+
+  if (!isShell) {
+    // Dynamic / authenticated content: network-only. On failure, serve a previously
+    // cached version if one exists (e.g., a cached redirect to /login). These responses
+    // are not proactively written to the cache by this service worker.
+    event.respondWith(
+      fetch(event.request).catch(() => caches.match(event.request))
+    );
+    return;
+  }
+
+  // App-shell assets: network-first, cache only safe public responses.
+  event.respondWith(
+    fetch(event.request)
+      .then(response => {
+        const cc = response.headers.get('Cache-Control') || '';
+        if (response.ok && response.type === 'basic' && !/no-store|private/i.test(cc)) {
+          caches.open(CACHE).then(cache => cache.put(event.request, response.clone()));
+        }
+        return response;
+      })
+      .catch(() => caches.match(event.request))
+  );
+});
 `
+
+// Decoded PNG bytes for each embedded PNG icon, populated once in init().
+var (
+	touchIconBytes []byte
+	icon192Bytes   []byte
+	icon512Bytes   []byte
+)
+
+func init() {
+	var err error
+	if touchIconBytes, err = base64.StdEncoding.DecodeString(touchIconPNG); err != nil {
+		log.Fatalf("failed to decode touchIconPNG: %v", err)
+	}
+	if icon192Bytes, err = base64.StdEncoding.DecodeString(icon192PNG); err != nil {
+		log.Fatalf("failed to decode icon192PNG: %v", err)
+	}
+	if icon512Bytes, err = base64.StdEncoding.DecodeString(icon512PNG); err != nil {
+		log.Fatalf("failed to decode icon512PNG: %v", err)
+	}
+}
 
 func generateToken() string {
 	b := make([]byte, 32)
@@ -341,38 +414,23 @@ func handler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if r.URL.Path == "/apple-touch-icon.png" {
-		pngData, err := base64.StdEncoding.DecodeString(touchIconPNG)
-		if err != nil {
-			http.Error(w, "icon unavailable", http.StatusInternalServerError)
-			return
-		}
 		w.Header().Set("Content-Type", "image/png")
 		w.Header().Set("Cache-Control", "public, max-age=86400")
-		w.Write(pngData) //nolint:errcheck
+		w.Write(touchIconBytes) //nolint:errcheck
 		return
 	}
 
 	if r.URL.Path == "/icon-192.png" {
-		pngData, err := base64.StdEncoding.DecodeString(icon192PNG)
-		if err != nil {
-			http.Error(w, "icon unavailable", http.StatusInternalServerError)
-			return
-		}
 		w.Header().Set("Content-Type", "image/png")
 		w.Header().Set("Cache-Control", "public, max-age=86400")
-		w.Write(pngData) //nolint:errcheck
+		w.Write(icon192Bytes) //nolint:errcheck
 		return
 	}
 
 	if r.URL.Path == "/icon-512.png" {
-		pngData, err := base64.StdEncoding.DecodeString(icon512PNG)
-		if err != nil {
-			http.Error(w, "icon unavailable", http.StatusInternalServerError)
-			return
-		}
 		w.Header().Set("Content-Type", "image/png")
 		w.Header().Set("Cache-Control", "public, max-age=86400")
-		w.Write(pngData) //nolint:errcheck
+		w.Write(icon512Bytes) //nolint:errcheck
 		return
 	}
 
