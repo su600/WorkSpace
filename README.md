@@ -34,8 +34,8 @@ PORTAL_PASS=yourpassword \
 |------|--------|------|
 | `PORTAL_DIR` | `/root/.openclaw/workspace` | 挂载的工作目录路径 |
 | `PORTAL_PORT` | `3000` | 监听端口 |
-| `PORTAL_USER` | `su600` | 登录用户名 |
-| `PORTAL_PASS` | `password123` | 登录密码 |
+| `PORTAL_USER` | `` | 登录用户名 |
+| `PORTAL_PASS` | `` | 登录密码 |
 | `PORTAL_TLS` | `false` | 设为 `true` 启用 Cookie Secure 属性（部署在 HTTPS 后端时使用） |
 
 ## 截图
