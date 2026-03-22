@@ -730,7 +730,7 @@ a:hover{text-decoration:underline}
 				actionBtn = `<a href="` + hrefPath + `?download=1" class="btn-dl" title="下载">⬇</a>`
 			}
 
-			mtimeStr := res.Mtime.Format(mtimeFormat)
+			mtimeStr := res.Mtime.Local().Format(mtimeFormat)
 			linkClass := "file-link"
 			if res.IsDir {
 				linkClass += " dir-link"
@@ -1045,7 +1045,7 @@ a:hover{text-decoration:underline}
 					`</form></div>`
 			}
 
-			mtimeStr := f.Mtime.Format(mtimeFormat)
+			mtimeStr := f.Mtime.Local().Format(mtimeFormat)
 			linkClass := "file-link"
 			if f.IsDir {
 				linkClass += " dir-link"
