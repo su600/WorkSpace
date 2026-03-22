@@ -22,6 +22,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	_ "time/tzdata"
 
 	"github.com/yuin/goldmark"
 	"github.com/yuin/goldmark/extension"
@@ -52,6 +53,8 @@ const (
 	mtimeFormat         = "01-02 15:04"
 	searchMaxResults    = 500
 )
+
+var mtimeLocation = time.FixedZone("Asia/Shanghai", 8*3600)
 
 // faviconSVG is the inline SVG icon served at /favicon.svg and referenced by all pages.
 const faviconSVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><rect width="32" height="32" rx="6" fill="#1a73e8"/><text x="16" y="22" text-anchor="middle" font-family="sans-serif" font-size="18" font-weight="bold" fill="white">W</text></svg>`
@@ -170,6 +173,12 @@ var (
 )
 
 func init() {
+	if loc, err := time.LoadLocation("Asia/Shanghai"); err == nil {
+		mtimeLocation = loc
+	} else {
+		log.Printf("warning: cannot load Asia/Shanghai timezone, falling back to +08: %v", err)
+	}
+
 	var err error
 	if touchIconBytes, err = base64.StdEncoding.DecodeString(touchIconPNG); err != nil {
 		log.Fatalf("failed to decode touchIconPNG: %v", err)
@@ -730,7 +739,7 @@ a:hover{text-decoration:underline}
 				actionBtn = `<a href="` + hrefPath + `?download=1" class="btn-dl" title="下载">⬇</a>`
 			}
 
-			mtimeStr := res.Mtime.Local().Format(mtimeFormat)
+			mtimeStr := formatMtime(res.Mtime)
 			linkClass := "file-link"
 			if res.IsDir {
 				linkClass += " dir-link"
@@ -1045,7 +1054,7 @@ a:hover{text-decoration:underline}
 					`</form></div>`
 			}
 
-			mtimeStr := f.Mtime.Local().Format(mtimeFormat)
+			mtimeStr := formatMtime(f.Mtime)
 			linkClass := "file-link"
 			if f.IsDir {
 				linkClass += " dir-link"
@@ -1369,6 +1378,10 @@ func buildBreadcrumbs(relPath string) []breadcrumb {
 		})
 	}
 	return bcs
+}
+
+func formatMtime(t time.Time) string {
+	return t.In(mtimeLocation).Format(mtimeFormat)
 }
 
 func humanSize(b int64) string {
