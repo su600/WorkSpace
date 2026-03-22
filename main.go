@@ -682,7 +682,7 @@ a:hover{text-decoration:underline}
 <body>
 <header class="header">
   <div class="header-left">
-    <span class="header-logo">🚀</span>
+    <span class="header-logo">🚀WorkSpace</span>
     <span class="header-brand">WorkSpace</span>
   </div>
   <div class="header-right">
