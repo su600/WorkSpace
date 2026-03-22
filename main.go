@@ -81,7 +81,7 @@ const manifestJSON = `{
   "display": "standalone",
   "background_color": "#1a73e8",
   "theme_color": "#1a73e8",
-  "orientation": "any",
+  "orientation": "portrait",
   "icons": [
     {
       "src": "/favicon.svg",
@@ -118,7 +118,7 @@ const APP_SHELL = [
   '/apple-touch-icon.png',
 ];
 
-self.addEventListener('install', event => {
+self.addEventListener('install', event =>{
   event.waitUntil(caches.open(CACHE).then(cache => cache.addAll(APP_SHELL)));
   self.skipWaiting();
 });
