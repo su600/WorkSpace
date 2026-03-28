@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"html"
+	"io"
 	"io/fs"
 	"log"
 	"mime"
@@ -1302,7 +1303,7 @@ func isPreviewableFile(name string) bool {
 // ─── File previews ────────────────────────────────────────────────────────────
 
 // previewPageHeader returns the common HTML head and header bar for preview pages.
-func previewPageHeader(fileName, relPath, parentURL, icon string) string {
+func previewPageHeader(fileName, parentURL, icon string) string {
 	return fmt.Sprintf(`<!DOCTYPE html><html lang="zh-CN"><head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
@@ -1371,7 +1372,7 @@ func previewPDF(w http.ResponseWriter, absPath, relPath string) {
 	w.WriteHeader(http.StatusOK)
 
 	var sb strings.Builder
-	sb.WriteString(previewPageHeader(fileName, relPath, parentURL, "📕"))
+	sb.WriteString(previewPageHeader(fileName, parentURL, "📕"))
 	sb.WriteString(`    <a href="` + dlURL + `" class="btn-dl">⬇ 下载</a>
     <a href="/logout" class="btn-logout">退出</a>
   </div>
@@ -1381,7 +1382,7 @@ func previewPDF(w http.ResponseWriter, absPath, relPath string) {
 .pdf-wrapper iframe{flex:1;border:none;width:100%;min-height:0}
 </style>
 <div class="pdf-wrapper">
-  <iframe src="` + html.EscapeString(rawURL) + `"></iframe>
+  <iframe src="` + html.EscapeString(rawURL) + `" title="PDF preview: ` + html.EscapeString(fileName) + `"></iframe>
 </div>
 <script>if('serviceWorker' in navigator){navigator.serviceWorker.register('/sw.js').catch(function(){});}</script>
 </body></html>`)
@@ -1405,7 +1406,21 @@ func previewText(w http.ResponseWriter, absPath, relPath string) {
 	fileName := filepath.Base(relPath)
 	dlURL := "/" + urlEncodePath(relPath) + "?download=1"
 
-	content, err := os.ReadFile(absPath)
+	info, err := os.Stat(absPath)
+	if err != nil {
+		http.Error(w, "Cannot read file", http.StatusInternalServerError)
+		return
+	}
+	fileSize := info.Size()
+
+	f, err := os.Open(absPath)
+	if err != nil {
+		http.Error(w, "Cannot read file", http.StatusInternalServerError)
+		return
+	}
+	defer f.Close()
+
+	content, err := io.ReadAll(io.LimitReader(f, maxTextPreviewBytes+1))
 	if err != nil {
 		http.Error(w, "Cannot read file", http.StatusInternalServerError)
 		return
@@ -1421,7 +1436,7 @@ func previewText(w http.ResponseWriter, absPath, relPath string) {
 	w.WriteHeader(http.StatusOK)
 
 	var sb strings.Builder
-	sb.WriteString(previewPageHeader(fileName, relPath, parentURL, "📝"))
+	sb.WriteString(previewPageHeader(fileName, parentURL, "📝"))
 	sb.WriteString(`    <a href="` + dlURL + `" class="btn-dl">⬇ 下载</a>
     <a href="/logout" class="btn-logout">退出</a>
   </div>
@@ -1445,7 +1460,7 @@ func previewText(w http.ResponseWriter, absPath, relPath string) {
   <div class="text-card-header"><span>`)
 	sb.WriteString(html.EscapeString(fileName))
 	sb.WriteString(`</span><span>`)
-	sb.WriteString(humanSize(int64(len(content))))
+	sb.WriteString(humanSize(fileSize))
 	sb.WriteString(`</span></div>
   <div class="text-body"><pre>`)
 
@@ -1491,7 +1506,7 @@ func previewImage(w http.ResponseWriter, absPath, relPath string) {
 	w.WriteHeader(http.StatusOK)
 
 	var sb strings.Builder
-	sb.WriteString(previewPageHeader(fileName, relPath, parentURL, "🖼️"))
+	sb.WriteString(previewPageHeader(fileName, parentURL, "🖼️"))
 	sb.WriteString(`    <a href="` + dlURL + `" class="btn-dl">⬇ 下载</a>
     <a href="/logout" class="btn-logout">退出</a>
   </div>
@@ -1511,8 +1526,10 @@ func previewImage(w http.ResponseWriter, absPath, relPath string) {
 <div class="img-info" id="img-info">` + html.EscapeString(fileName) + `</div>
 <script>
 var img=document.getElementById('preview-img');
+var info=document.getElementById('img-info');
+var baseName=info.textContent;
 img.onload=function(){
-  document.getElementById('img-info').textContent='` + html.EscapeString(fileName) + ` — '+img.naturalWidth+'×'+img.naturalHeight;
+  info.textContent=baseName+' — '+img.naturalWidth+'×'+img.naturalHeight;
 };
 if('serviceWorker' in navigator){navigator.serviceWorker.register('/sw.js').catch(function(){});}
 </script>
