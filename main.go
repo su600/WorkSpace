@@ -1296,25 +1296,7 @@ func isTextFile(absPath string) bool {
 
 // isPreviewableFile returns true if the file can be previewed in the browser.
 func isPreviewableFile(name string) bool {
-	lower := strings.ToLower(name)
-	if strings.HasSuffix(lower, ".pdf") {
-		return true
-	}
-	switch strings.ToLower(filepath.Ext(name)) {
-	case ".jpg", ".jpeg", ".png", ".gif", ".svg", ".webp", ".ico", ".bmp":
-		return true
-	case ".txt", ".log", ".csv", ".tsv",
-		".sh", ".bash", ".zsh", ".fish",
-		".py", ".go", ".js", ".ts", ".jsx", ".tsx",
-		".html", ".htm", ".css", ".xml",
-		".json", ".yaml", ".yml", ".toml", ".ini", ".cfg", ".conf",
-		".sql", ".rs", ".java", ".c", ".cpp", ".h", ".hpp",
-		".rb", ".php", ".pl", ".lua", ".r",
-		".env", ".gitignore", ".dockerignore",
-		".rst", ".tex", ".properties":
-		return true
-	}
-	return false
+	return isPDFFile(name) || isImageFile(name) || isTextFile(name)
 }
 
 // ─── File previews ────────────────────────────────────────────────────────────
