@@ -2,7 +2,7 @@
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no">
 <meta name="theme-color" content="#1a73e8">
 <link rel="manifest" href="/manifest.json">
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
@@ -10,25 +10,44 @@
 <title>🚀 WorkSpace 门禁</title>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
-body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;background:linear-gradient(135deg,#1a73e8 0%,#0d47a1 100%);min-height:100vh;display:flex;align-items:center;justify-content:center}
-.login-container{width:100%;max-width:380px;padding:20px}
-.card{background:#fff;border-radius:16px;box-shadow:0 8px 32px rgba(0,0,0,.2);padding:32px;animation:slideUp .4s ease-out}
-@keyframes slideUp{from{opacity:0;transform:translateY(20px)}to{opacity:1;transform:translateY(0)}}
-.logo{text-align:center;font-size:48px;margin-bottom:16px}
-.title{text-align:center;font-size:24px;font-weight:600;color:#202124;margin-bottom:8px}
-.subtitle{text-align:center;font-size:14px;color:#5f6368;margin-bottom:24px}
-.form-group{margin-bottom:16px}
-label{display:block;font-size:13px;font-weight:500;color:#202124;margin-bottom:6px}
-input[type="text"],input[type="password"]{width:100%;padding:10px 12px;border:1px solid #dadce0;border-radius:8px;font-size:14px;transition:all .2s;font-family:inherit}
-input[type="text"]:focus,input[type="password"]:focus{outline:none;border-color:#1a73e8;box-shadow:0 0 0 3px rgba(26,115,232,.1)}
-.checkbox-group{display:flex;align-items:center;gap:8px;margin-bottom:24px}
-input[type="checkbox"]{width:16px;height:16px;border:1px solid #dadce0;border-radius:4px;cursor:pointer}
-.checkbox-label{font-size:13px;color:#5f6368;cursor:pointer;user-select:none}
-.btn-login{width:100%;padding:10px;background:linear-gradient(135deg,#1a73e8,#1558b0);color:#fff;border:none;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer;transition:all .2s;box-shadow:0 2px 8px rgba(26,115,232,.3)}
-.btn-login:hover{transform:translateY(-2px);box-shadow:0 4px 16px rgba(26,115,232,.4)}
-.btn-login:active{transform:translateY(0)}
-.footer{text-align:center;font-size:12px;color:#9aa0a6;margin-top:16px}
-.error-msg{color:#d32f2f;background:#ffebee;padding:12px;border-radius:6px;margin-bottom:16px;text-align:center;font-size:14px}
+body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;background:linear-gradient(135deg,#1a73e8 0%,#0d47a1 100%);min-height:100vh;display:flex;align-items:center;justify-content:center;padding:16px;overflow:hidden}
+body::before{content:'';position:fixed;top:-50%;left:-50%;width:200%;height:200%;background:radial-gradient(circle,rgba(255,255,255,.1) 0%,rgba(255,255,255,0) 70%);animation:rotate 30s linear infinite}
+@keyframes rotate{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}
+.login-container{width:100%;max-width:400px;position:relative;z-index:1}
+.card{background:rgba(255,255,255,.98);backdrop-filter:blur(10px);border-radius:20px;box-shadow:0 20px 60px rgba(0,0,0,.3),0 0 0 1px rgba(255,255,255,.1);padding:40px 32px;animation:slideUp .5s cubic-bezier(.34,1.56,.64,1)}
+@keyframes slideUp{from{opacity:0;transform:translateY(30px) scale(.95)}to{opacity:1;transform:translateY(0) scale(1)}}
+.logo{text-align:center;font-size:64px;margin-bottom:20px;animation:bounce 1s ease-out .2s}
+@keyframes bounce{0%,20%,50%,80%,100%{transform:translateY(0)}40%{transform:translateY(-15px)}60%{transform:translateY(-8px)}}
+.title{text-align:center;font-size:28px;font-weight:700;color:#202124;margin-bottom:8px;letter-spacing:-.5px}
+.subtitle{text-align:center;font-size:14px;color:#5f6368;margin-bottom:32px}
+.form-group{margin-bottom:20px;position:relative}
+label{position:absolute;left:13px;top:11px;font-size:14px;color:#5f6368;transition:all .2s cubic-bezier(.4,0,.2,1);pointer-events:none;background:#fff;padding:0 4px}
+input[type="text"],input[type="password"]{width:100%;padding:12px 14px;border:2px solid #e0e0e0;border-radius:10px;font-size:15px;transition:all .2s;font-family:inherit;background:#fff}
+input[type="text"]:focus,input[type="password"]:focus{outline:none;border-color:#1a73e8;box-shadow:0 0 0 4px rgba(26,115,232,.1)}
+input[type="text"]:focus + label,input[type="password"]:focus + label,
+input[type="text"]:not(:placeholder-shown) + label,input[type="password"]:not(:placeholder-shown) + label{top:-8px;font-size:12px;color:#1a73e8;font-weight:600}
+input::placeholder{color:transparent}
+.checkbox-group{display:flex;align-items:center;gap:10px;margin-bottom:28px;padding:4px 0}
+input[type="checkbox"]{width:18px;height:18px;border:2px solid #dadce0;border-radius:5px;cursor:pointer;appearance:none;position:relative;transition:all .2s}
+input[type="checkbox"]:checked{background:#1a73e8;border-color:#1a73e8}
+input[type="checkbox"]:checked::after{content:'✓';position:absolute;color:#fff;font-size:13px;font-weight:bold;top:50%;left:50%;transform:translate(-50%,-50%)}
+.checkbox-label{font-size:14px;color:#5f6368;cursor:pointer;user-select:none}
+.btn-login{width:100%;padding:13px;background:linear-gradient(135deg,#1a73e8,#1558b0);color:#fff;border:none;border-radius:10px;font-size:15px;font-weight:600;cursor:pointer;transition:all .3s cubic-bezier(.4,0,.2,1);box-shadow:0 4px 12px rgba(26,115,232,.4);position:relative;overflow:hidden}
+.btn-login::before{content:'';position:absolute;top:50%;left:50%;width:0;height:0;border-radius:50%;background:rgba(255,255,255,.3);transform:translate(-50%,-50%);transition:width .6s,height .6s}
+.btn-login:hover{transform:translateY(-2px);box-shadow:0 8px 20px rgba(26,115,232,.5)}
+.btn-login:active::before{width:300px;height:300px}
+.btn-login:active{transform:scale(.98)}
+.footer{text-align:center;font-size:12px;color:rgba(255,255,255,.9);margin-top:20px;text-shadow:0 1px 2px rgba(0,0,0,.2)}
+.error-msg{color:#d32f2f;background:#ffebee;padding:14px;border-radius:10px;margin-bottom:20px;text-align:center;font-size:14px;border-left:4px solid #d32f2f;animation:shake .5s}
+@keyframes shake{0%,100%{transform:translateX(0)}10%,30%,50%,70%,90%{transform:translateX(-5px)}20%,40%,60%,80%{transform:translateX(5px)}}
+@media(max-width:480px){
+  .card{padding:32px 24px;border-radius:16px}
+  .logo{font-size:56px;margin-bottom:16px}
+  .title{font-size:24px}
+  .subtitle{font-size:13px;margin-bottom:28px}
+  input[type="text"],input[type="password"]{padding:11px 12px;font-size:14px}
+  .btn-login{padding:12px;font-size:14px}
+}
 </style>
 </head>
 <body>
@@ -39,12 +58,12 @@ input[type="checkbox"]{width:16px;height:16px;border:1px solid #dadce0;border-ra
 <div class="subtitle">安全访问工作区</div>
 <form method="POST" id="loginForm">
 <div class="form-group">
+<input type="text" id="username" name="username" placeholder=" " required autofocus>
 <label for="username">用户名</label>
-<input type="text" id="username" name="username" placeholder="su600" required autofocus>
 </div>
 <div class="form-group">
+<input type="password" id="password" name="password" placeholder=" " required>
 <label for="password">密码</label>
-<input type="password" id="password" name="password" placeholder="•••••••••" required>
 </div>
 <div class="checkbox-group">
 <input type="checkbox" id="remember" name="remember">
@@ -52,8 +71,8 @@ input[type="checkbox"]{width:16px;height:16px;border:1px solid #dadce0;border-ra
 </div>
 <button type="submit" class="btn-login">登 录</button>
 </form>
-<div class="footer">🔒 您的凭证已加密传输</div>
 </div>
+<div class="footer">🔒 您的凭证已加密传输</div>
 </div>
 <script>
 // 页面加载时恢复记住的用户名
