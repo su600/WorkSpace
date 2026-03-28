@@ -533,6 +533,14 @@ func handler(w http.ResponseWriter, r *http.Request) {
 		} else {
 			renderMarkdown(w, absPath, relPath)
 		}
+	} else if _, ok := query["raw"]; ok {
+		serveFile(w, r, absPath)
+	} else if isPDFFile(absPath) {
+		previewPDF(w, absPath, relPath)
+	} else if isImageFile(absPath) {
+		previewImage(w, absPath, relPath)
+	} else if isTextFile(absPath) {
+		previewText(w, absPath, relPath)
 	} else {
 		serveFile(w, r, absPath)
 	}
@@ -745,7 +753,7 @@ a:hover{text-decoration:underline}
 				linkClass += " dir-link"
 			}
 			target := ""
-			if strings.HasSuffix(strings.ToLower(res.Name), ".md") {
+			if strings.HasSuffix(strings.ToLower(res.Name), ".md") || isPreviewableFile(res.Name) {
 				target = ` target="_blank" rel="noopener noreferrer"`
 			}
 
@@ -1060,7 +1068,7 @@ a:hover{text-decoration:underline}
 				linkClass += " dir-link"
 			}
 			target := ""
-			if strings.HasSuffix(strings.ToLower(f.Name), ".md") {
+			if strings.HasSuffix(strings.ToLower(f.Name), ".md") || isPreviewableFile(f.Name) {
 				target = ` target="_blank" rel="noopener noreferrer"`
 			}
 
@@ -1254,6 +1262,280 @@ if('serviceWorker' in navigator){navigator.serviceWorker.register('/sw.js').catc
 		editActionURL,
 		escapedSource,
 	)
+}
+
+// ─── File type detection ──────────────────────────────────────────────────────
+
+func isPDFFile(absPath string) bool {
+	return strings.ToLower(filepath.Ext(absPath)) == ".pdf"
+}
+
+func isImageFile(absPath string) bool {
+	switch strings.ToLower(filepath.Ext(absPath)) {
+	case ".jpg", ".jpeg", ".png", ".gif", ".svg", ".webp", ".ico", ".bmp":
+		return true
+	}
+	return false
+}
+
+func isTextFile(absPath string) bool {
+	switch strings.ToLower(filepath.Ext(absPath)) {
+	case ".txt", ".log", ".csv", ".tsv",
+		".sh", ".bash", ".zsh", ".fish",
+		".py", ".go", ".js", ".ts", ".jsx", ".tsx",
+		".html", ".htm", ".css", ".xml",
+		".json", ".yaml", ".yml", ".toml", ".ini", ".cfg", ".conf",
+		".sql", ".rs", ".java", ".c", ".cpp", ".h", ".hpp",
+		".rb", ".php", ".pl", ".lua", ".r",
+		".env", ".gitignore", ".dockerignore",
+		".rst", ".tex", ".properties":
+		return true
+	}
+	return false
+}
+
+// isPreviewableFile returns true if the file can be previewed in the browser.
+func isPreviewableFile(name string) bool {
+	lower := strings.ToLower(name)
+	if strings.HasSuffix(lower, ".pdf") {
+		return true
+	}
+	switch strings.ToLower(filepath.Ext(name)) {
+	case ".jpg", ".jpeg", ".png", ".gif", ".svg", ".webp", ".ico", ".bmp":
+		return true
+	case ".txt", ".log", ".csv", ".tsv",
+		".sh", ".bash", ".zsh", ".fish",
+		".py", ".go", ".js", ".ts", ".jsx", ".tsx",
+		".html", ".htm", ".css", ".xml",
+		".json", ".yaml", ".yml", ".toml", ".ini", ".cfg", ".conf",
+		".sql", ".rs", ".java", ".c", ".cpp", ".h", ".hpp",
+		".rb", ".php", ".pl", ".lua", ".r",
+		".env", ".gitignore", ".dockerignore",
+		".rst", ".tex", ".properties":
+		return true
+	}
+	return false
+}
+
+// ─── File previews ────────────────────────────────────────────────────────────
+
+// previewPageHeader returns the common HTML head and header bar for preview pages.
+func previewPageHeader(fileName, relPath, parentURL, icon string) string {
+	return fmt.Sprintf(`<!DOCTYPE html><html lang="zh-CN"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#1a73e8">
+<link rel="manifest" href="/manifest.json">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+<title>%s — WorkSpace</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+:root{--blue:#1a73e8;--bg:#f0f2f5;--card:#fff;--border:#e8eaed;--text:#202124;--muted:#5f6368;--code-bg:#f6f8fa}
+body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Oxygen,Ubuntu,sans-serif;background:var(--bg);color:var(--text);min-height:100vh;display:flex;flex-direction:column}
+a{color:var(--blue);text-decoration:none}
+a:hover{text-decoration:underline}
+.header{background:linear-gradient(135deg,#1a73e8,#0d47a1);color:#fff;padding:0 16px;height:56px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:100;box-shadow:0 2px 8px rgba(0,0,0,.2);flex-shrink:0}
+.header-left{display:flex;align-items:center;gap:8px;flex-shrink:0}
+.header-logo{font-size:20px;flex-shrink:0}
+.header-brand{font-size:15px;font-weight:700;letter-spacing:.5px;white-space:nowrap}
+.header-title{font-size:13px;opacity:.85;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:200px}
+.header-right{display:flex;align-items:center;gap:8px;flex-shrink:0}
+.btn-back{color:#fff;background:rgba(255,255,255,.2);border:1px solid rgba(255,255,255,.3);padding:5px 12px;border-radius:20px;font-size:12px;transition:background .15s;white-space:nowrap}
+.btn-back:hover{background:rgba(255,255,255,.3);text-decoration:none}
+.btn-dl{color:#fff;background:rgba(255,255,255,.2);border:1px solid rgba(255,255,255,.3);padding:5px 12px;border-radius:20px;font-size:12px;transition:background .15s;white-space:nowrap}
+.btn-dl:hover{background:rgba(255,255,255,.3);text-decoration:none}
+.btn-logout{color:rgba(255,255,255,.8);font-size:12px;padding:5px 10px;border-radius:20px;transition:background .15s}
+.btn-logout:hover{background:rgba(255,255,255,.15);text-decoration:none;color:#fff}
+@media(max-width:640px){
+  .header-brand{display:none}
+  .header-title{max-width:120px}
+}
+</style>`,
+		html.EscapeString(fileName),
+	) + fmt.Sprintf(`
+</head>
+<body>
+<header class="header">
+  <div class="header-left">
+    <span class="header-logo">%s</span>
+    <span class="header-brand">WorkSpace</span>
+    <span class="header-title">%s</span>
+  </div>
+  <div class="header-right">
+    <a href="%s" class="btn-back">← 返回</a>`,
+		icon,
+		html.EscapeString(fileName),
+		parentURL,
+	)
+}
+
+func previewPDF(w http.ResponseWriter, absPath, relPath string) {
+	parent := path.Dir(relPath)
+	if parent == "." {
+		parent = ""
+	}
+	var parentURL string
+	if parent == "" {
+		parentURL = "/"
+	} else {
+		parentURL = "/" + urlEncodePath(parent)
+	}
+	fileName := filepath.Base(relPath)
+	rawURL := "/" + urlEncodePath(relPath) + "?raw"
+	dlURL := "/" + urlEncodePath(relPath) + "?download=1"
+
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.WriteHeader(http.StatusOK)
+
+	var sb strings.Builder
+	sb.WriteString(previewPageHeader(fileName, relPath, parentURL, "📕"))
+	sb.WriteString(`    <a href="` + dlURL + `" class="btn-dl">⬇ 下载</a>
+    <a href="/logout" class="btn-logout">退出</a>
+  </div>
+</header>
+<style>
+.pdf-wrapper{flex:1;display:flex;flex-direction:column;padding:0}
+.pdf-wrapper iframe{flex:1;border:none;width:100%;min-height:0}
+</style>
+<div class="pdf-wrapper">
+  <iframe src="` + html.EscapeString(rawURL) + `"></iframe>
+</div>
+<script>if('serviceWorker' in navigator){navigator.serviceWorker.register('/sw.js').catch(function(){});}</script>
+</body></html>`)
+	fmt.Fprint(w, sb.String())
+}
+
+// maxTextPreviewBytes caps text file preview at 1 MiB to avoid excessive memory use.
+const maxTextPreviewBytes = 1 << 20
+
+func previewText(w http.ResponseWriter, absPath, relPath string) {
+	parent := path.Dir(relPath)
+	if parent == "." {
+		parent = ""
+	}
+	var parentURL string
+	if parent == "" {
+		parentURL = "/"
+	} else {
+		parentURL = "/" + urlEncodePath(parent)
+	}
+	fileName := filepath.Base(relPath)
+	dlURL := "/" + urlEncodePath(relPath) + "?download=1"
+
+	content, err := os.ReadFile(absPath)
+	if err != nil {
+		http.Error(w, "Cannot read file", http.StatusInternalServerError)
+		return
+	}
+
+	truncated := false
+	if len(content) > maxTextPreviewBytes {
+		content = content[:maxTextPreviewBytes]
+		truncated = true
+	}
+
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.WriteHeader(http.StatusOK)
+
+	var sb strings.Builder
+	sb.WriteString(previewPageHeader(fileName, relPath, parentURL, "📝"))
+	sb.WriteString(`    <a href="` + dlURL + `" class="btn-dl">⬇ 下载</a>
+    <a href="/logout" class="btn-logout">退出</a>
+  </div>
+</header>
+<style>
+.wrapper{max-width:1100px;margin:24px auto;padding:0 16px 48px;width:100%}
+.text-card{background:var(--card);border-radius:12px;box-shadow:0 1px 4px rgba(0,0,0,.08);overflow:hidden}
+.text-card-header{padding:12px 16px;border-bottom:1px solid var(--border);font-size:13px;color:var(--muted);display:flex;align-items:center;justify-content:space-between}
+.text-body{padding:16px 20px;overflow-x:auto}
+.text-body pre{margin:0;font-family:"SFMono-Regular",Consolas,"Liberation Mono",Menlo,monospace;font-size:13px;line-height:1.6;color:var(--text);white-space:pre-wrap;word-wrap:break-word;tab-size:4}
+.text-body .line-numbers{display:inline-block;width:auto;min-width:3em;text-align:right;color:#b0b0b0;user-select:none;-webkit-user-select:none;padding-right:16px;border-right:1px solid var(--border);margin-right:16px;vertical-align:top;white-space:pre;line-height:1.6;font-family:"SFMono-Regular",Consolas,"Liberation Mono",Menlo,monospace;font-size:13px}
+.text-body .code-content{display:inline-block;vertical-align:top;white-space:pre-wrap;word-wrap:break-word}
+.truncated{padding:12px 16px;background:#fff8e1;color:#f57f17;font-size:13px;border-top:1px solid var(--border)}
+@media(max-width:640px){
+  .wrapper{padding:0 8px 32px;margin:12px auto}
+  .text-body{padding:12px}
+  .text-body pre{font-size:12px}
+}
+</style>
+<div class="wrapper"><div class="text-card">
+  <div class="text-card-header"><span>`)
+	sb.WriteString(html.EscapeString(fileName))
+	sb.WriteString(`</span><span>`)
+	sb.WriteString(humanSize(int64(len(content))))
+	sb.WriteString(`</span></div>
+  <div class="text-body"><pre>`)
+
+	// Add line numbers and content
+	lines := strings.Split(string(content), "\n")
+	sb.WriteString(`<span class="line-numbers">`)
+	for i := range lines {
+		if i > 0 {
+			sb.WriteString("\n")
+		}
+		sb.WriteString(fmt.Sprintf("%d", i+1))
+	}
+	sb.WriteString(`</span><span class="code-content">`)
+	sb.WriteString(html.EscapeString(string(content)))
+	sb.WriteString(`</span>`)
+
+	sb.WriteString(`</pre></div>`)
+	if truncated {
+		sb.WriteString(`<div class="truncated">⚠️ 文件过大，仅显示前 1 MiB 内容。请下载查看完整文件。</div>`)
+	}
+	sb.WriteString(`</div></div>
+<script>if('serviceWorker' in navigator){navigator.serviceWorker.register('/sw.js').catch(function(){});}</script>
+</body></html>`)
+	fmt.Fprint(w, sb.String())
+}
+
+func previewImage(w http.ResponseWriter, absPath, relPath string) {
+	parent := path.Dir(relPath)
+	if parent == "." {
+		parent = ""
+	}
+	var parentURL string
+	if parent == "" {
+		parentURL = "/"
+	} else {
+		parentURL = "/" + urlEncodePath(parent)
+	}
+	fileName := filepath.Base(relPath)
+	rawURL := "/" + urlEncodePath(relPath) + "?raw"
+	dlURL := "/" + urlEncodePath(relPath) + "?download=1"
+
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.WriteHeader(http.StatusOK)
+
+	var sb strings.Builder
+	sb.WriteString(previewPageHeader(fileName, relPath, parentURL, "🖼️"))
+	sb.WriteString(`    <a href="` + dlURL + `" class="btn-dl">⬇ 下载</a>
+    <a href="/logout" class="btn-logout">退出</a>
+  </div>
+</header>
+<style>
+.img-wrapper{flex:1;display:flex;align-items:center;justify-content:center;padding:24px;overflow:auto;background:var(--bg)}
+.img-wrapper img{max-width:100%;max-height:calc(100vh - 104px);object-fit:contain;border-radius:8px;box-shadow:0 2px 12px rgba(0,0,0,.12);background:var(--card);cursor:zoom-in;transition:transform .2s}
+.img-wrapper img.zoomed{max-width:none;max-height:none;cursor:zoom-out;transform:none;box-shadow:none}
+.img-info{text-align:center;padding:8px;font-size:12px;color:var(--muted);background:var(--bg);flex-shrink:0}
+@media(max-width:640px){
+  .img-wrapper{padding:12px}
+}
+</style>
+<div class="img-wrapper">
+  <img id="preview-img" src="` + html.EscapeString(rawURL) + `" alt="` + html.EscapeString(fileName) + `" onclick="this.classList.toggle('zoomed')">
+</div>
+<div class="img-info" id="img-info">` + html.EscapeString(fileName) + `</div>
+<script>
+var img=document.getElementById('preview-img');
+img.onload=function(){
+  document.getElementById('img-info').textContent='` + html.EscapeString(fileName) + ` — '+img.naturalWidth+'×'+img.naturalHeight;
+};
+if('serviceWorker' in navigator){navigator.serviceWorker.register('/sw.js').catch(function(){});}
+</script>
+</body></html>`)
+	fmt.Fprint(w, sb.String())
 }
 
 // ─── File serving ─────────────────────────────────────────────────────────────
