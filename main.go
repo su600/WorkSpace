@@ -266,8 +266,9 @@ func loadPins() {
 
 func savePins() {
 	pinMu.RLock()
-	data, err := json.Marshal(pinnedPaths)
+	pathsCopy := append([]string(nil), pinnedPaths...)
 	pinMu.RUnlock()
+	data, err := json.Marshal(pathsCopy)
 	if err != nil {
 		log.Printf("pin: marshal error: %v", err)
 		return
