@@ -254,13 +254,36 @@ func loadPins() {
 		log.Printf("pin: read error: %v", err)
 		return
 	}
-	var paths []string
-	if err := json.Unmarshal(data, &paths); err != nil {
+	var raw []string
+	if err := json.Unmarshal(data, &raw); err != nil {
 		log.Printf("pin: cannot parse pin file: %v", err)
 		return
 	}
+	// Normalize, validate, and deduplicate paths loaded from disk.
+	seen := make(map[string]struct{}, len(raw))
+	valid := make([]string, 0, len(raw))
+	for _, rp := range raw {
+		// Normalize using filepath so Windows absolute paths are also caught.
+		cleaned := filepath.ToSlash(filepath.Clean(filepath.FromSlash(rp)))
+		// Reject absolute paths and paths that escape the root.
+		if filepath.IsAbs(filepath.FromSlash(cleaned)) || cleaned == ".." || strings.HasPrefix(cleaned, "../") {
+			log.Printf("pin: discarding invalid path from pin file: %q", rp)
+			continue
+		}
+		// Re-validate containment using isUnder (resolves via filepath.Rel).
+		abs := filepath.Join(cfgDirectory, filepath.FromSlash(cleaned))
+		if !isUnder(cfgDirectory, abs) {
+			log.Printf("pin: discarding out-of-root path from pin file: %q", rp)
+			continue
+		}
+		if _, dup := seen[cleaned]; dup {
+			continue
+		}
+		seen[cleaned] = struct{}{}
+		valid = append(valid, cleaned)
+	}
 	pinMu.Lock()
-	pinnedPaths = paths
+	pinnedPaths = valid
 	pinMu.Unlock()
 }
 
