@@ -974,9 +974,11 @@ func pinHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Access denied", http.StatusForbidden)
 		return
 	}
-	if _, err := os.Stat(absPath); err != nil {
-		http.Error(w, "File not found", http.StatusNotFound)
-		return
+	if action == "pin" {
+		if _, err := os.Stat(absPath); err != nil {
+			http.Error(w, "File not found", http.StatusNotFound)
+			return
+		}
 	}
 
 	switch action {
