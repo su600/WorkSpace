@@ -498,6 +498,18 @@ func handler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Handle markdown save — POST ?edit writes content back to disk atomically.
+	if r.Method == http.MethodPost {
+		if _, ok := query["edit"]; ok {
+			if !info.IsDir() && strings.HasSuffix(strings.ToLower(absPath), ".md") {
+				saveMarkdown(w, r, absPath, relPath)
+				return
+			}
+			http.Error(w, "Edit not supported for this file type", http.StatusBadRequest)
+			return
+		}
+	}
+
 	// Handle file deletion — POST only to avoid accidental deletions via GET
 	if r.Method == http.MethodPost {
 		if _, ok := query["delete"]; ok {
