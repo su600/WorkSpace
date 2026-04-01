@@ -1,5 +1,11 @@
 # ── Stage 1: build ──────────────────────────────────────────────────────────
 # TARGETOS/TARGETARCH are forwarded to the Go toolchain for cross-compilation.
+# NOTE: We intentionally omit `--platform=$BUILDPLATFORM` here. Under BuildKit/buildx
+# multi-arch builds this makes the builder stage default to the *target* platform,
+# which can cause the Go toolchain to run under QEMU emulation (or fail if binfmt/QEMU
+# is not available). This keeps cross-compilation behavior unchanged but may impact
+# performance on multi-arch builds. Use a separate Dockerfile or build setup if you
+# require the compiler to always run natively on the build platform.
 FROM golang:1.24-alpine AS builder
 
 ARG TARGETOS=linux
