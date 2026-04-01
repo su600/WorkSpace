@@ -1244,7 +1244,7 @@ a:hover{text-decoration:underline}
 			sb.WriteString(`<div class="card-header"><span class="card-header-title">📌 已固定</span><span class="file-count">` + fmt.Sprintf("%d 项", len(pinEntries)) + `</span></div>`)
 			sb.WriteString(`<div class="pinned-grid">`)
 			for _, pe := range pinEntries {
-				pinName := filepath.Base(pe.relPath)
+				pinName := path.Base(pe.relPath)
 				pinHref := "/" + urlEncodePath(pe.relPath)
 				pinIcon := fileIcon(pinName)
 				if pe.info.IsDir() {
