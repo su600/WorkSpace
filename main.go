@@ -274,8 +274,58 @@ func savePins() {
 		return
 	}
 	p := filepath.Join(cfgDirectory, pinStateFile)
-	if err := os.WriteFile(p, data, 0o600); err != nil {
-		log.Printf("pin: write error: %v", err)
+
+	// Write pins atomically: temp file + fsync + rename.
+	tmpFile, err := os.CreateTemp(cfgDirectory, pinStateFile+".tmp-*")
+	if err != nil {
+		log.Printf("pin: cannot create temp file: %v", err)
+		return
+	}
+	tmpName := tmpFile.Name()
+	renamed := false
+	defer func() {
+		if !renamed {
+			_ = os.Remove(tmpName)
+		}
+	}()
+
+	// Ensure permissions are as expected (0o600).
+	if err := os.Chmod(tmpName, 0o600); err != nil {
+		log.Printf("pin: chmod temp file error: %v", err)
+		_ = tmpFile.Close()
+		return
+	}
+
+	if _, err := tmpFile.Write(data); err != nil {
+		log.Printf("pin: write temp file error: %v", err)
+		_ = tmpFile.Close()
+		return
+	}
+	if err := tmpFile.Sync(); err != nil {
+		log.Printf("pin: fsync temp file error: %v", err)
+		_ = tmpFile.Close()
+		return
+	}
+	if err := tmpFile.Close(); err != nil {
+		log.Printf("pin: close temp file error: %v", err)
+		return
+	}
+
+	if err := os.Rename(tmpName, p); err != nil {
+		log.Printf("pin: rename temp file error: %v", err)
+		return
+	}
+	renamed = true
+
+	// Best-effort fsync of directory to persist the rename.
+	dirPath := filepath.Dir(p)
+	if dirFile, err := os.Open(dirPath); err == nil {
+		if err := dirFile.Sync(); err != nil {
+			log.Printf("pin: fsync dir error: %v", err)
+		}
+		_ = dirFile.Close()
+	} else {
+		log.Printf("pin: open dir for fsync error: %v", err)
 	}
 }
 
