@@ -1,7 +1,6 @@
 # ── Stage 1: build ──────────────────────────────────────────────────────────
-# Use BUILDPLATFORM so the compiler always runs natively; TARGETOS/TARGETARCH
-# are forwarded to the Go toolchain for proper cross-compilation.
-FROM --platform=$BUILDPLATFORM golang:1.24-alpine AS builder
+# TARGETOS/TARGETARCH are forwarded to the Go toolchain for cross-compilation.
+FROM golang:1.24-alpine AS builder
 
 ARG TARGETOS=linux
 ARG TARGETARCH=amd64
