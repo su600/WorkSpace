@@ -7,6 +7,7 @@ import (
 	"crypto/subtle"
 	_ "embed"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"html"
@@ -53,6 +54,13 @@ const (
 	sessionDurationLong = 30 * 24 * time.Hour
 	mtimeFormat         = "01-02 15:04"
 	searchMaxResults    = 500
+	pinStateFile        = ".workspace_pins.json"
+)
+
+// Pin storage — ordered list of pinned relative paths, persisted to disk.
+var (
+	pinMu       sync.RWMutex
+	pinnedPaths []string
 )
 
 var mtimeLocation = time.FixedZone("Asia/Shanghai", 8*3600)
@@ -234,6 +242,74 @@ func clearSession(r *http.Request) {
 	sessionMu.Unlock()
 }
 
+// ─── Pin helpers ──────────────────────────────────────────────────────────────
+
+func loadPins() {
+	p := filepath.Join(cfgDirectory, pinStateFile)
+	data, err := os.ReadFile(p)
+	if err != nil {
+		return // file may not exist yet
+	}
+	var paths []string
+	if err := json.Unmarshal(data, &paths); err != nil {
+		log.Printf("pin: cannot parse pin file: %v", err)
+		return
+	}
+	pinMu.Lock()
+	pinnedPaths = paths
+	pinMu.Unlock()
+}
+
+func savePins() {
+	pinMu.RLock()
+	data, err := json.Marshal(pinnedPaths)
+	pinMu.RUnlock()
+	if err != nil {
+		log.Printf("pin: marshal error: %v", err)
+		return
+	}
+	p := filepath.Join(cfgDirectory, pinStateFile)
+	if err := os.WriteFile(p, data, 0o600); err != nil {
+		log.Printf("pin: write error: %v", err)
+	}
+}
+
+func isPinned(relPath string) bool {
+	pinMu.RLock()
+	defer pinMu.RUnlock()
+	for _, p := range pinnedPaths {
+		if p == relPath {
+			return true
+		}
+	}
+	return false
+}
+
+func addPin(relPath string) {
+	pinMu.Lock()
+	for _, p := range pinnedPaths {
+		if p == relPath {
+			pinMu.Unlock()
+			return // already pinned
+		}
+	}
+	pinnedPaths = append(pinnedPaths, relPath)
+	pinMu.Unlock()
+	savePins()
+}
+
+func removePin(relPath string) {
+	pinMu.Lock()
+	for i, p := range pinnedPaths {
+		if p == relPath {
+			pinnedPaths = append(pinnedPaths[:i], pinnedPaths[i+1:]...)
+			break
+		}
+	}
+	pinMu.Unlock()
+	savePins()
+}
+
 func envOrDefault(key, def string) string {
 	if v := os.Getenv(key); v != "" {
 		return v
@@ -267,6 +343,9 @@ func main() {
 	}
 	cfgDirectory = absDir
 
+	// Load persisted pins.
+	loadPins()
+
 	// Periodically remove expired sessions to prevent unbounded memory growth.
 	go func() {
 		ticker := time.NewTicker(time.Hour)
@@ -285,6 +364,7 @@ func main() {
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/login", loginHandler)
+	mux.HandleFunc("/pin", pinHandler)
 	mux.HandleFunc("/search", searchHandler)
 	mux.HandleFunc("/", handler)
 	addr := ":" + cfgPort
@@ -805,6 +885,80 @@ a:hover{text-decoration:underline}
 	fmt.Fprint(w, sb.String())
 }
 
+// ─── Pin handler ──────────────────────────────────────────────────────────────
+
+func pinHandler(w http.ResponseWriter, r *http.Request) {
+	if !validateSession(r) {
+		http.Redirect(w, r, "/login", http.StatusSeeOther)
+		return
+	}
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "Bad request", http.StatusBadRequest)
+		return
+	}
+
+	action := r.FormValue("action") // "pin" or "unpin"
+	relPath := r.FormValue("path")
+
+	// Sanitise relPath.
+	relPath = path.Clean(relPath)
+	if relPath == "." {
+		relPath = ""
+	}
+	if relPath == "" || strings.HasPrefix(relPath, "../") || relPath == ".." {
+		http.Error(w, "Access denied", http.StatusForbidden)
+		return
+	}
+
+	absPath := filepath.Join(cfgDirectory, filepath.FromSlash(relPath))
+	if !isUnder(absPath, cfgDirectory) {
+		http.Error(w, "Access denied", http.StatusForbidden)
+		return
+	}
+	if _, err := os.Stat(absPath); err != nil {
+		http.Error(w, "File not found", http.StatusNotFound)
+		return
+	}
+
+	switch action {
+	case "pin":
+		addPin(relPath)
+	case "unpin":
+		removePin(relPath)
+	default:
+		http.Error(w, "Bad request", http.StatusBadRequest)
+		return
+	}
+
+	// Compute the redirect target from the validated relPath to avoid relying on
+	// a user-controlled "next" value.
+	// After pin: go to the parent directory of the pinned item (i.e. where we came from).
+	// After unpin: go to "/" so the user sees the updated pinned section on the homepage.
+	var redirectURL string
+	if action == "unpin" {
+		redirectURL = "/"
+	} else {
+		parent := path.Dir(relPath)
+		if parent == "." {
+			parent = ""
+		}
+		if parent == "" {
+			redirectURL = "/"
+		} else {
+			redirectURL = "/" + urlEncodePath(parent)
+		}
+	}
+	// Validate the constructed URL is a safe relative path before redirecting.
+	if pu, err := url.Parse(redirectURL); err != nil || pu.Scheme != "" || pu.Host != "" {
+		redirectURL = "/"
+	}
+	http.Redirect(w, r, redirectURL, http.StatusSeeOther)
+}
+
 // ─── Directory listing ────────────────────────────────────────────────────────
 
 type fileEntry struct {
@@ -948,7 +1102,7 @@ a:hover{text-decoration:underline}
 .file-table .col-name{min-width:160px}
 .file-table .col-size{width:90px;text-align:right;color:var(--muted)}
 .file-table .col-mtime{width:130px;color:var(--muted)}
-.file-table .col-action{width:120px;text-align:center}
+.file-table .col-action{width:150px;text-align:center}
 .file-name{display:flex;align-items:center;gap:8px}
 .file-icon{font-size:18px;flex-shrink:0;line-height:1}
 .file-link{font-weight:500;color:var(--text);transition:color .15s}
@@ -960,7 +1114,25 @@ a:hover{text-decoration:underline}
 .btn-del{display:inline-flex;align-items:center;padding:5px 10px;border:1px solid var(--border);border-radius:8px;color:var(--muted);font-size:12px;transition:border-color .2s,color .2s,background .2s,transform .2s;background:var(--card);cursor:pointer;line-height:1;touch-action:manipulation}
 .btn-del:hover{border-color:#d93025;color:#d93025;background:#fce8e6}
 .btn-del:active{transform:scale(.95)}
+.btn-pin{display:inline-flex;align-items:center;padding:5px 10px;border:1px solid var(--border);border-radius:8px;color:var(--muted);font-size:12px;transition:border-color .2s,color .2s,background .2s,transform .2s;background:var(--card);cursor:pointer;line-height:1;touch-action:manipulation}
+.btn-pin:hover{border-color:#f9a825;color:#f9a825;background:#fff8e1}
+.btn-pin:active{transform:scale(.95)}
+.btn-pin--pinned{border-color:#f9a825;color:#f9a825;background:#fff8e1}
+.btn-pin--pinned:hover{border-color:#d93025;color:#d93025;background:#fce8e6}
 .action-btns{display:flex;gap:6px;justify-content:center;align-items:center}
+
+/* Pinned section */
+.pinned-card{margin-bottom:12px}
+.pinned-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:10px;padding:14px}
+.pin-item{display:flex;align-items:center;gap:10px;padding:10px 12px;border:1px solid var(--border);border-radius:8px;background:var(--bg);transition:background .15s,border-color .15s;position:relative}
+.pin-item:hover{border-color:var(--blue);background:var(--active)}
+.pin-item-icon{font-size:20px;flex-shrink:0}
+.pin-item-info{flex:1;min-width:0}
+.pin-item-name{font-weight:500;font-size:14px;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:block}
+.pin-item-name:hover{color:var(--blue);text-decoration:none}
+.pin-item-path{font-size:11px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:2px}
+.pin-item-unpin{flex-shrink:0;background:none;border:none;cursor:pointer;font-size:13px;color:var(--muted);padding:4px 6px;border-radius:4px;transition:color .15s,background .15s;line-height:1}
+.pin-item-unpin:hover{color:#d93025;background:#fce8e6}
 
 /* Mobile cards view */
 @media(max-width:640px){
@@ -995,13 +1167,16 @@ a:hover{text-decoration:underline}
   .file-table .col-size{order:2;color:var(--muted);font-size:12px}
   .file-table .col-mtime{order:3;font-size:12px;flex:1;justify-content:flex-end;text-align:right}
   .file-table .col-action{order:4;margin-left:4px}
-  .btn-dl,.btn-del{padding:6px 10px;font-size:13px}
+  .btn-dl,.btn-del,.btn-pin{padding:6px 10px;font-size:13px}
 }
 
 /* Empty state */
 .empty{text-align:center;padding:48px 24px;color:var(--muted)}
 .empty-icon{font-size:48px;margin-bottom:12px}
 .empty-text{font-size:15px}
+@media(max-width:480px){
+  .pinned-grid{grid-template-columns:1fr 1fr}
+}
 </style>
 </head>
 <body>
@@ -1038,7 +1213,72 @@ a:hover{text-decoration:underline}
 	}
 	sb.WriteString(`</nav>`)
 
-	sb.WriteString(`<div class="container"><div class="card">`)
+	sb.WriteString(`<div class="container">`)
+
+	// Pinned section — shown only on the root homepage.
+	if relPath == "" {
+		pinMu.RLock()
+		pins := make([]string, len(pinnedPaths))
+		copy(pins, pinnedPaths)
+		pinMu.RUnlock()
+
+		// Resolve each pin to its FileInfo in one pass, skipping missing or invalid entries.
+		type pinnedEntry struct {
+			relPath string
+			info    os.FileInfo
+		}
+		var pinEntries []pinnedEntry
+		for _, pin := range pins {
+			absPin := filepath.Join(cfgDirectory, filepath.FromSlash(pin))
+			if !isUnder(absPin, cfgDirectory) {
+				continue // ignore any out-of-bounds paths in the JSON file
+			}
+			info, err := os.Stat(absPin)
+			if err == nil {
+				pinEntries = append(pinEntries, pinnedEntry{pin, info})
+			}
+		}
+
+		if len(pinEntries) > 0 {
+			sb.WriteString(`<div class="card pinned-card">`)
+			sb.WriteString(`<div class="card-header"><span class="card-header-title">📌 已固定</span><span class="file-count">` + fmt.Sprintf("%d 项", len(pinEntries)) + `</span></div>`)
+			sb.WriteString(`<div class="pinned-grid">`)
+			for _, pe := range pinEntries {
+				pinName := filepath.Base(pe.relPath)
+				pinHref := "/" + urlEncodePath(pe.relPath)
+				pinIcon := fileIcon(pinName)
+				if pe.info.IsDir() {
+					pinIcon = "📁"
+				}
+				parentPath := path.Dir(pe.relPath)
+				if parentPath == "." {
+					parentPath = ""
+				}
+				target := ""
+				if !pe.info.IsDir() && (strings.HasSuffix(strings.ToLower(pinName), ".md") || isPreviewableFile(pinName)) {
+					target = ` target="_blank" rel="noopener noreferrer"`
+				}
+
+				sb.WriteString(`<div class="pin-item">`)
+				sb.WriteString(`<span class="pin-item-icon">` + pinIcon + `</span>`)
+				sb.WriteString(`<div class="pin-item-info">`)
+				sb.WriteString(`<a href="` + pinHref + `" class="pin-item-name"` + target + `>` + html.EscapeString(pinName) + `</a>`)
+				if parentPath != "" {
+					sb.WriteString(`<div class="pin-item-path">` + html.EscapeString("/"+parentPath) + `</div>`)
+				}
+				sb.WriteString(`</div>`)
+				sb.WriteString(`<form method="POST" action="/pin" style="display:contents">`)
+				sb.WriteString(`<input type="hidden" name="action" value="unpin">`)
+				sb.WriteString(`<input type="hidden" name="path" value="` + html.EscapeString(pe.relPath) + `">`)
+				sb.WriteString(`<button type="submit" class="pin-item-unpin" title="取消固定">✕</button>`)
+				sb.WriteString(`</form>`)
+				sb.WriteString(`</div>`)
+			}
+			sb.WriteString(`</div></div>`)
+		}
+	}
+
+	sb.WriteString(`<div class="card">`)
 	sb.WriteString(`<div class="card-header"><span class="card-header-title">📂 文件列表</span><span class="file-count">` + fmt.Sprintf("%d 项", len(files)) + `</span></div>`)
 
 	// Mobile sort bar — visible only on small screens since the table header is hidden there
@@ -1087,15 +1327,42 @@ a:hover{text-decoration:underline}
 				hrefPath = "/" + urlEncodePath(relPath) + "/" + urlEncodePath(f.Name)
 			}
 
+			// Compute the pin path (slash-separated relative path from cfgDirectory).
+			var filePinPath string
+			if relPath == "" {
+				filePinPath = f.Name
+			} else {
+				filePinPath = relPath + "/" + f.Name
+			}
+			pinned := isPinned(filePinPath)
+			var pinAction, pinClass string
+			if pinned {
+				pinAction = "unpin"
+				pinClass = "btn-pin btn-pin--pinned"
+			} else {
+				pinAction = "pin"
+				pinClass = "btn-pin"
+			}
+			pinTitle := "固定到首页"
+			if pinned {
+				pinTitle = "取消固定"
+			}
+			pinBtn := `<form method="POST" action="/pin" style="display:contents">` +
+				`<input type="hidden" name="action" value="` + pinAction + `">` +
+				`<input type="hidden" name="path" value="` + html.EscapeString(filePinPath) + `">` +
+				`<button type="submit" class="` + pinClass + `" title="` + pinTitle + `">📌</button>` +
+				`</form>`
+
 			var icon, sizeStr, actionBtn string
 			if f.IsDir {
 				icon = "📁"
 				sizeStr = "—"
-				actionBtn = ""
+				actionBtn = `<div class="action-btns">` + pinBtn + `</div>`
 			} else {
 				icon = fileIcon(f.Name)
 				sizeStr = humanSize(f.Size)
 				actionBtn = `<div class="action-btns">` +
+					pinBtn +
 					`<a href="` + hrefPath + `?download=1" class="btn-dl" title="下载">⬇</a>` +
 					`<form method="POST" action="` + hrefPath + `?delete=1" style="display:contents">` +
 					`<button type="submit" class="btn-del" title="删除" aria-label="删除" data-name="` + escapedName + `" onclick='return confirm("确定要删除文件 \""+this.dataset.name+"\" 吗？此操作不可撤销！")'>🗑</button>` +
