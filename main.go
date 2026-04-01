@@ -1431,6 +1431,24 @@ func renderMarkdown(w http.ResponseWriter, absPath, relPath string) {
 	fileName := filepath.Base(relPath)
 	escapedSource := html.EscapeString(string(content))
 
+	// Determine current pin state for this file.
+	pinned := isPinned(relPath)
+	var pinBtnClass, pinBtnAction, pinBtnTitle string
+	if pinned {
+		pinBtnClass = "btn-pin-md btn-pin-md--pinned"
+		pinBtnAction = "unpin"
+		pinBtnTitle = "取消固定"
+	} else {
+		pinBtnClass = "btn-pin-md"
+		pinBtnAction = "pin"
+		pinBtnTitle = "固定到首页"
+	}
+	pinForm := `<form id="pin-form" method="POST" action="/pin" style="display:contents">` +
+		`<input type="hidden" name="action" value="` + pinBtnAction + `">` +
+		`<input type="hidden" name="path" value="` + html.EscapeString(relPath) + `">` +
+		`<button type="submit" id="btn-pin" class="` + pinBtnClass + `" title="` + pinBtnTitle + `">📌</button>` +
+		`</form>`
+
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
 
@@ -1471,6 +1489,11 @@ a:hover{text-decoration:underline}
 .btn-cancel{color:#fff;background:rgba(255,255,255,.15);border:1px solid rgba(255,255,255,.25);padding:6px 14px;border-radius:20px;font-size:13px;cursor:pointer;transition:background .2s,transform .2s;white-space:nowrap;-webkit-tap-highlight-color:transparent;touch-action:manipulation}
 .btn-cancel:hover{background:rgba(255,255,255,.25)}
 .btn-cancel:active{background:rgba(255,255,255,.35);transform:scale(.96)}
+.btn-pin-md{color:#fff;background:rgba(255,255,255,.15);border:1px solid rgba(255,255,255,.25);padding:6px 14px;border-radius:20px;font-size:13px;cursor:pointer;transition:background .2s,transform .2s;white-space:nowrap;-webkit-tap-highlight-color:transparent;touch-action:manipulation;line-height:1}
+.btn-pin-md:hover{background:rgba(255,255,255,.25)}
+.btn-pin-md:active{background:rgba(255,255,255,.35);transform:scale(.96)}
+.btn-pin-md--pinned{background:rgba(249,168,37,.35);border-color:rgba(249,168,37,.6)}
+.btn-pin-md--pinned:hover{background:rgba(249,168,37,.5)}
 
 /* Container */
 .wrapper{max-width:860px;margin:24px auto;padding:0 16px 48px}
@@ -1515,7 +1538,7 @@ a:hover{text-decoration:underline}
   .header-brand{display:none}
   .header-title{max-width:120px}
   .header-right{gap:6px}
-  .btn-back,.btn-edit,.btn-save,.btn-cancel{padding:8px 14px;font-size:13px}
+  .btn-back,.btn-edit,.btn-save,.btn-cancel,.btn-pin-md{padding:8px 14px;font-size:13px}
   .btn-logout{padding:8px 12px;font-size:13px}
   .wrapper{padding:0 8px 32px;margin:12px auto}
   .md-card{padding:24px 16px;border-radius:10px}
@@ -1535,6 +1558,7 @@ a:hover{text-decoration:underline}
   </div>
   <div class="header-right">
     <a href="%s" id="btn-back" class="btn-back">← 返回</a>
+    %s
     <button id="btn-edit" class="btn-edit" onclick="startEdit()">✏️ 编辑</button>
     <button id="btn-save" class="btn-save" style="display:none" onclick="document.getElementById('edit-form').submit()">💾 保存</button>
     <button id="btn-cancel" class="btn-cancel" style="display:none" onclick="cancelEdit()">✕ 取消</button>
@@ -1559,6 +1583,7 @@ function startEdit(){
   document.getElementById('md-editor').focus();
   document.getElementById('btn-edit').style.display='none';
   document.getElementById('btn-back').style.display='none';
+  document.getElementById('btn-pin').style.display='none';
   document.getElementById('btn-save').style.display='';
   document.getElementById('btn-cancel').style.display='';
 }
@@ -1567,6 +1592,7 @@ function cancelEdit(){
   document.getElementById('edit-form').style.display='none';
   document.getElementById('btn-edit').style.display='';
   document.getElementById('btn-back').style.display='';
+  document.getElementById('btn-pin').style.display='';
   document.getElementById('btn-save').style.display='none';
   document.getElementById('btn-cancel').style.display='none';
 }
@@ -1576,6 +1602,7 @@ if('serviceWorker' in navigator){navigator.serviceWorker.register('/sw.js').catc
 		html.EscapeString(fileName),
 		html.EscapeString(fileName),
 		parentURL,
+		pinForm,
 		rendered.String(),
 		editActionURL,
 		escapedSource,
