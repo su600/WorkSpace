@@ -248,7 +248,11 @@ func loadPins() {
 	p := filepath.Join(cfgDirectory, pinStateFile)
 	data, err := os.ReadFile(p)
 	if err != nil {
-		return // file may not exist yet
+		if errors.Is(err, os.ErrNotExist) {
+			return // file may not exist yet
+		}
+		log.Printf("pin: read error: %v", err)
+		return
 	}
 	var paths []string
 	if err := json.Unmarshal(data, &paths); err != nil {
