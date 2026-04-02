@@ -1234,29 +1234,31 @@ a:hover{text-decoration:underline}
   .sort-chip:hover{text-decoration:none;border-color:var(--blue);color:var(--blue)}
   .sort-chip:active{transform:scale(.96)}
 
-  /* Hide thead, render rows as cards */
+  /* Pinned section: horizontal scroll on mobile */
+  .pinned-grid{display:flex;flex-wrap:nowrap;overflow-x:auto;-webkit-overflow-scrolling:touch;scroll-snap-type:x mandatory;scrollbar-width:none;gap:10px;padding:14px}
+  .pinned-grid::-webkit-scrollbar{display:none}
+  .pin-item{flex-shrink:0;width:160px;scroll-snap-align:start}
+
+  /* Hide thead, render rows as single-line items */
   .file-table thead{display:none}
   .file-table,.file-table tbody,.file-table tr{display:block;width:100%}
-  .file-table tr{padding:12px;border-top:1px solid var(--border);display:flex;flex-wrap:wrap;gap:4px 10px;align-items:center;min-height:48px;transition:background .15s}
+  .file-table tr{padding:0 12px;border-top:1px solid var(--border);display:flex;flex-wrap:nowrap;gap:0 8px;align-items:center;min-height:52px;transition:background .15s}
   .file-table tr:active{background:var(--active)}
-  .file-table td{padding:0;border:none;font-size:14px;display:inline-flex;align-items:center}
-  .file-table .col-name{width:100%;order:1;display:flex}
-  .file-table .col-name .file-name{gap:10px}
-  .file-table .col-name .file-icon{font-size:20px}
-  .file-table .col-name .file-link{font-size:15px}
-  .file-table .col-size{order:2;color:var(--muted);font-size:12px}
-  .file-table .col-mtime{order:3;font-size:12px;flex:1;justify-content:flex-end;text-align:right}
-  .file-table .col-action{order:4;margin-left:4px}
-  .btn-dl,.btn-del,.btn-pin{padding:6px 10px;font-size:13px}
+  .file-table td{padding:0;border:none;font-size:14px;display:inline-flex;align-items:center;flex-shrink:0}
+  .file-table .col-name{flex:1;min-width:0;display:flex;overflow:hidden}
+  .file-table .col-name .file-name{gap:8px;min-width:0;flex:1;overflow:hidden}
+  .file-table .col-name .file-icon{font-size:20px;flex-shrink:0}
+  .file-table .col-name .file-link{font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+  .file-table .col-size{display:none}
+  .file-table .col-mtime{display:none}
+  .file-table .col-action{flex-shrink:0}
+  .btn-dl,.btn-del,.btn-pin{padding:6px 8px;font-size:13px}
 }
 
 /* Empty state */
 .empty{text-align:center;padding:48px 24px;color:var(--muted)}
 .empty-icon{font-size:48px;margin-bottom:12px}
 .empty-text{font-size:15px}
-@media(max-width:480px){
-  .pinned-grid{grid-template-columns:1fr 1fr}
-}
 </style>
 </head>
 <body>
@@ -1508,6 +1510,8 @@ func renderMarkdown(w http.ResponseWriter, absPath, relPath string) {
 		editActionURL = "/" + urlEncodePath(relPath) + "?edit"
 	}
 
+	dlURL := "/" + urlEncodePath(relPath) + "?download=1"
+
 	fileName := filepath.Base(relPath)
 	escapedSource := html.EscapeString(string(content))
 
@@ -1560,6 +1564,9 @@ a:hover{text-decoration:underline}
 .btn-logout{color:rgba(255,255,255,.8);font-size:13px;padding:6px 12px;border-radius:20px;transition:background .2s,color .2s,transform .2s;-webkit-tap-highlight-color:transparent;touch-action:manipulation}
 .btn-logout:hover{background:rgba(255,255,255,.15);text-decoration:none;color:#fff}
 .btn-logout:active{background:rgba(255,255,255,.25);transform:scale(.96)}
+.btn-dl{color:#fff;background:rgba(255,255,255,.15);border:1px solid rgba(255,255,255,.25);padding:6px 14px;border-radius:20px;font-size:13px;transition:background .2s,transform .2s;white-space:nowrap;-webkit-tap-highlight-color:transparent;touch-action:manipulation}
+.btn-dl:hover{background:rgba(255,255,255,.25);text-decoration:none}
+.btn-dl:active{background:rgba(255,255,255,.35);transform:scale(.96)}
 .btn-edit{color:#fff;background:rgba(255,255,255,.15);border:1px solid rgba(255,255,255,.25);padding:6px 14px;border-radius:20px;font-size:13px;cursor:pointer;transition:background .2s,transform .2s;white-space:nowrap;-webkit-tap-highlight-color:transparent;touch-action:manipulation}
 .btn-edit:hover{background:rgba(255,255,255,.25)}
 .btn-edit:active{background:rgba(255,255,255,.35);transform:scale(.96)}
@@ -1618,7 +1625,7 @@ a:hover{text-decoration:underline}
   .header-brand{display:none}
   .header-title{max-width:120px}
   .header-right{gap:6px}
-  .btn-back,.btn-edit,.btn-save,.btn-cancel,.btn-pin-md{padding:8px 14px;font-size:13px}
+  .btn-back,.btn-dl,.btn-edit,.btn-save,.btn-cancel,.btn-pin-md{padding:8px 14px;font-size:13px}
   .btn-logout{padding:8px 12px;font-size:13px}
   .wrapper{padding:0 8px 32px;margin:12px auto}
   .md-card{padding:24px 16px;border-radius:10px}
@@ -1639,6 +1646,7 @@ a:hover{text-decoration:underline}
   <div class="header-right">
     <a href="%s" id="btn-back" class="btn-back">← 返回</a>
     %s
+    <a href="%s" id="btn-dl" class="btn-dl">⬇ 下载</a>
     <button id="btn-edit" class="btn-edit" onclick="startEdit()">✏️ 编辑</button>
     <button id="btn-save" class="btn-save" style="display:none" onclick="document.getElementById('edit-form').submit()">💾 保存</button>
     <button id="btn-cancel" class="btn-cancel" style="display:none" onclick="cancelEdit()">✕ 取消</button>
@@ -1663,6 +1671,7 @@ function startEdit(){
   document.getElementById('md-editor').focus();
   document.getElementById('btn-edit').style.display='none';
   document.getElementById('btn-back').style.display='none';
+  document.getElementById('btn-dl').style.display='none';
   document.getElementById('btn-pin').style.display='none';
   document.getElementById('btn-save').style.display='';
   document.getElementById('btn-cancel').style.display='';
@@ -1672,6 +1681,7 @@ function cancelEdit(){
   document.getElementById('edit-form').style.display='none';
   document.getElementById('btn-edit').style.display='';
   document.getElementById('btn-back').style.display='';
+  document.getElementById('btn-dl').style.display='';
   document.getElementById('btn-pin').style.display='';
   document.getElementById('btn-save').style.display='none';
   document.getElementById('btn-cancel').style.display='none';
@@ -1683,6 +1693,7 @@ if('serviceWorker' in navigator){navigator.serviceWorker.register('/sw.js').catc
 		html.EscapeString(fileName),
 		parentURL,
 		pinForm,
+		html.EscapeString(dlURL),
 		rendered.String(),
 		editActionURL,
 		escapedSource,
