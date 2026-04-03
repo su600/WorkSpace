@@ -58,9 +58,14 @@ const (
 )
 
 // Pin storage — ordered list of pinned relative paths, persisted to disk.
+// pinCacheVer is bumped on every add/remove/load; renderPinnedSection caches its
+// rendered HTML against this version and skips re-statting on unchanged lists.
 var (
-	pinMu       sync.RWMutex
-	pinnedPaths []string
+	pinMu          sync.RWMutex
+	pinnedPaths    []string
+	pinCacheVer    uint64 // incremented whenever pinnedPaths changes
+	pinCachedVer   uint64 // version at which pinCachedHTML was last computed
+	pinCachedHTML  string // cached render output; valid when pinCachedVer == pinCacheVer
 )
 
 var mtimeLocation = time.FixedZone("Asia/Shanghai", 8*3600)
@@ -284,6 +289,7 @@ func loadPins() {
 	}
 	pinMu.Lock()
 	pinnedPaths = valid
+	pinCacheVer++
 	pinMu.Unlock()
 }
 
@@ -363,6 +369,125 @@ func isPinned(relPath string) bool {
 	return false
 }
 
+// pinnedSectionCSS is the CSS for the pinned section, shared across pages.
+const pinnedSectionCSS = `.pinned-card{margin-bottom:12px}` +
+	`.pinned-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:10px;padding:14px}` +
+	`.pin-item{display:flex;align-items:center;gap:10px;padding:10px 12px;border:1px solid var(--border);border-radius:8px;background:var(--bg);transition:background .15s,border-color .15s;position:relative}` +
+	`.pin-item:hover{border-color:var(--blue);background:var(--active)}` +
+	`.pin-item-icon{font-size:20px;flex-shrink:0}` +
+	`.pin-item-info{flex:1;min-width:0}` +
+	`.pin-item-name{font-weight:500;font-size:14px;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:block}` +
+	`.pin-item-name:hover{color:var(--blue);text-decoration:none}` +
+	`.pin-item-path{font-size:11px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:2px}` +
+	`.pin-item-unpin{flex-shrink:0;background:none;border:none;cursor:pointer;font-size:13px;color:var(--muted);padding:4px 6px;border-radius:4px;transition:color .15s,background .15s;line-height:1}` +
+	`.pin-item-unpin:hover{color:#d93025;background:#fce8e6}` +
+	`@media(max-width:640px){` +
+	`.pinned-grid{display:flex;flex-wrap:nowrap;overflow-x:auto;-webkit-overflow-scrolling:touch;scroll-snap-type:x mandatory;scrollbar-width:none;gap:10px;padding:14px}` +
+	`.pinned-grid::-webkit-scrollbar{display:none}` +
+	`.pin-item{flex-shrink:0;width:160px;scroll-snap-align:start}` +
+	`}`
+
+// renderPinnedSection returns the HTML for the pinned section card, or "" if there are no valid pins.
+// The result is cached in memory and only recomputed when the pin list version changes.
+func renderPinnedSection() string {
+	// Fast path: return cached HTML if the pin list hasn't changed.
+	pinMu.RLock()
+	if pinCachedVer == pinCacheVer {
+		h := pinCachedHTML
+		pinMu.RUnlock()
+		return h
+	}
+	pins := make([]string, len(pinnedPaths))
+	copy(pins, pinnedPaths)
+	ver := pinCacheVer
+	pinMu.RUnlock()
+
+	type pinnedEntry struct {
+		relPath string
+		info    os.FileInfo
+	}
+	var pinEntries []pinnedEntry
+	for _, pin := range pins {
+		absPin := filepath.Join(cfgDirectory, filepath.FromSlash(pin))
+		if !isUnder(absPin, cfgDirectory) {
+			continue
+		}
+
+		info, err := os.Lstat(absPin)
+		if err != nil {
+			continue
+		}
+
+		if info.Mode()&os.ModeSymlink != 0 {
+			resolvedPin, err := filepath.EvalSymlinks(absPin)
+			if err != nil || !isUnder(resolvedPin, cfgDirectory) {
+				continue
+			}
+			info, err = os.Stat(resolvedPin)
+			if err != nil {
+				continue
+			}
+		}
+
+		pinEntries = append(pinEntries, pinnedEntry{pin, info})
+	}
+
+	var rendered string
+	if len(pinEntries) > 0 {
+		var sb strings.Builder
+		sb.WriteString(`<div class="card pinned-card">`)
+		sb.WriteString(`<div class="card-header"><span class="card-header-title">📌 已固定</span><span class="file-count">` + fmt.Sprintf("%d 项", len(pinEntries)) + `</span></div>`)
+		sb.WriteString(`<div class="pinned-grid">`)
+		for _, pe := range pinEntries {
+			pinName := path.Base(pe.relPath)
+			pinHref := "/" + urlEncodePath(pe.relPath)
+			pinIcon := fileIcon(pinName)
+			if pe.info.IsDir() {
+				pinIcon = "📁"
+			}
+			parentPath := path.Dir(pe.relPath)
+			if parentPath == "." {
+				parentPath = ""
+			}
+			target := ""
+			if !pe.info.IsDir() && (strings.HasSuffix(strings.ToLower(pinName), ".md") || isPreviewableFile(pinName)) {
+				target = ` target="_blank" rel="noopener noreferrer"`
+			}
+			sb.WriteString(`<div class="pin-item">`)
+			sb.WriteString(`<span class="pin-item-icon">` + pinIcon + `</span>`)
+			sb.WriteString(`<div class="pin-item-info">`)
+			sb.WriteString(`<a href="` + pinHref + `" class="pin-item-name"` + target + `>` + html.EscapeString(pinName) + `</a>`)
+			if parentPath != "" {
+				sb.WriteString(`<div class="pin-item-path">` + html.EscapeString("/"+parentPath) + `</div>`)
+			}
+			sb.WriteString(`</div>`)
+			sb.WriteString(`<form method="POST" action="/pin" style="display:contents">`)
+			sb.WriteString(`<input type="hidden" name="action" value="unpin">`)
+			sb.WriteString(`<input type="hidden" name="path" value="` + html.EscapeString(pe.relPath) + `">`)
+			sb.WriteString(`<button type="submit" class="pin-item-unpin" title="取消固定" aria-label="取消固定">✕</button>`)
+			sb.WriteString(`</form>`)
+			sb.WriteString(`</div>`)
+		}
+		sb.WriteString(`</div></div>`)
+		rendered = sb.String()
+	}
+
+	// Store in cache; only update if the version hasn't been bumped while we computed.
+	// If it was bumped and another goroutine has already cached the newer result, use that.
+	// Otherwise leave the cache empty for the next request to fill with the latest state.
+	pinMu.Lock()
+	if pinCacheVer == ver {
+		pinCachedVer = ver
+		pinCachedHTML = rendered
+	} else if pinCachedVer == pinCacheVer {
+		// A newer version was computed and cached by another goroutine; return it.
+		rendered = pinCachedHTML
+	}
+	pinMu.Unlock()
+
+	return rendered
+}
+
 func addPin(relPath string) {
 	pinMu.Lock()
 	for _, p := range pinnedPaths {
@@ -372,20 +497,26 @@ func addPin(relPath string) {
 		}
 	}
 	pinnedPaths = append(pinnedPaths, relPath)
+	pinCacheVer++
 	pinMu.Unlock()
 	savePins()
 }
 
 func removePin(relPath string) {
 	pinMu.Lock()
+	removed := false
 	for i, p := range pinnedPaths {
 		if p == relPath {
 			pinnedPaths = append(pinnedPaths[:i], pinnedPaths[i+1:]...)
+			pinCacheVer++
+			removed = true
 			break
 		}
 	}
 	pinMu.Unlock()
-	savePins()
+	if removed {
+		savePins()
+	}
 }
 
 func envOrDefault(key, def string) string {
@@ -844,6 +975,8 @@ a:hover{text-decoration:underline}
 .hint{text-align:center;padding:48px 24px;color:var(--muted)}
 .hint-icon{font-size:48px;margin-bottom:12px}
 .hint-text{font-size:15px}
+/* Pinned section */
+` + pinnedSectionCSS + `
 @media(max-width:640px){
   .header{height:auto;min-height:56px;flex-wrap:wrap;padding:10px 12px;gap:8px}
   .header-left{width:auto}
@@ -888,7 +1021,9 @@ a:hover{text-decoration:underline}
 </header>
 `)
 
-	sb.WriteString(`<div class="container"><div class="card">`)
+	sb.WriteString(`<div class="container">`)
+	sb.WriteString(renderPinnedSection())
+	sb.WriteString(`<div class="card">`)
 
 	if query == "" {
 		sb.WriteString(`<div class="hint"><div class="hint-icon">🔍</div><div class="hint-text">请在上方输入关键词搜索文件</div></div>`)
@@ -1202,17 +1337,7 @@ a:hover{text-decoration:underline}
 .action-btns{display:flex;gap:6px;justify-content:center;align-items:center}
 
 /* Pinned section */
-.pinned-card{margin-bottom:12px}
-.pinned-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:10px;padding:14px}
-.pin-item{display:flex;align-items:center;gap:10px;padding:10px 12px;border:1px solid var(--border);border-radius:8px;background:var(--bg);transition:background .15s,border-color .15s;position:relative}
-.pin-item:hover{border-color:var(--blue);background:var(--active)}
-.pin-item-icon{font-size:20px;flex-shrink:0}
-.pin-item-info{flex:1;min-width:0}
-.pin-item-name{font-weight:500;font-size:14px;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:block}
-.pin-item-name:hover{color:var(--blue);text-decoration:none}
-.pin-item-path{font-size:11px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:2px}
-.pin-item-unpin{flex-shrink:0;background:none;border:none;cursor:pointer;font-size:13px;color:var(--muted);padding:4px 6px;border-radius:4px;transition:color .15s,background .15s;line-height:1}
-.pin-item-unpin:hover{color:#d93025;background:#fce8e6}
+` + pinnedSectionCSS + `
 
 /* Mobile cards view */
 @media(max-width:640px){
@@ -1234,29 +1359,26 @@ a:hover{text-decoration:underline}
   .sort-chip:hover{text-decoration:none;border-color:var(--blue);color:var(--blue)}
   .sort-chip:active{transform:scale(.96)}
 
-  /* Hide thead, render rows as cards */
+  /* Hide thead, render rows as single-line items */
   .file-table thead{display:none}
   .file-table,.file-table tbody,.file-table tr{display:block;width:100%}
-  .file-table tr{padding:12px;border-top:1px solid var(--border);display:flex;flex-wrap:wrap;gap:4px 10px;align-items:center;min-height:48px;transition:background .15s}
+  .file-table tr{padding:0 12px;border-top:1px solid var(--border);display:flex;flex-wrap:nowrap;gap:0 8px;align-items:center;min-height:52px;transition:background .15s}
   .file-table tr:active{background:var(--active)}
-  .file-table td{padding:0;border:none;font-size:14px;display:inline-flex;align-items:center}
-  .file-table .col-name{width:100%;order:1;display:flex}
-  .file-table .col-name .file-name{gap:10px}
-  .file-table .col-name .file-icon{font-size:20px}
-  .file-table .col-name .file-link{font-size:15px}
-  .file-table .col-size{order:2;color:var(--muted);font-size:12px}
-  .file-table .col-mtime{order:3;font-size:12px;flex:1;justify-content:flex-end;text-align:right}
-  .file-table .col-action{order:4;margin-left:4px}
-  .btn-dl,.btn-del,.btn-pin{padding:6px 10px;font-size:13px}
+  .file-table td{padding:0;border:none;font-size:14px;display:inline-flex;align-items:center;flex-shrink:0}
+  .file-table .col-name{flex:1;min-width:0;display:flex;overflow:hidden}
+  .file-table .col-name .file-name{gap:8px;min-width:0;flex:1;overflow:hidden}
+  .file-table .col-name .file-icon{font-size:20px;flex-shrink:0}
+  .file-table .col-name .file-link{font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+  .file-table .col-size{display:none}
+  .file-table .col-mtime{display:none}
+  .file-table .col-action{flex-shrink:0}
+  .btn-dl,.btn-del,.btn-pin{padding:6px 8px;font-size:13px}
 }
 
 /* Empty state */
 .empty{text-align:center;padding:48px 24px;color:var(--muted)}
 .empty-icon{font-size:48px;margin-bottom:12px}
 .empty-text{font-size:15px}
-@media(max-width:480px){
-  .pinned-grid{grid-template-columns:1fr 1fr}
-}
 </style>
 </head>
 <body>
@@ -1295,68 +1417,8 @@ a:hover{text-decoration:underline}
 
 	sb.WriteString(`<div class="container">`)
 
-	// Pinned section — shown only on the root homepage.
-	if relPath == "" {
-		pinMu.RLock()
-		pins := make([]string, len(pinnedPaths))
-		copy(pins, pinnedPaths)
-		pinMu.RUnlock()
-
-		// Resolve each pin to its FileInfo in one pass, skipping missing or invalid entries.
-		type pinnedEntry struct {
-			relPath string
-			info    os.FileInfo
-		}
-		var pinEntries []pinnedEntry
-		for _, pin := range pins {
-			absPin := filepath.Join(cfgDirectory, filepath.FromSlash(pin))
-			if !isUnder(absPin, cfgDirectory) {
-				continue // ignore any out-of-bounds paths in the JSON file
-			}
-			info, err := os.Stat(absPin)
-			if err == nil {
-				pinEntries = append(pinEntries, pinnedEntry{pin, info})
-			}
-		}
-
-		if len(pinEntries) > 0 {
-			sb.WriteString(`<div class="card pinned-card">`)
-			sb.WriteString(`<div class="card-header"><span class="card-header-title">📌 已固定</span><span class="file-count">` + fmt.Sprintf("%d 项", len(pinEntries)) + `</span></div>`)
-			sb.WriteString(`<div class="pinned-grid">`)
-			for _, pe := range pinEntries {
-				pinName := path.Base(pe.relPath)
-				pinHref := "/" + urlEncodePath(pe.relPath)
-				pinIcon := fileIcon(pinName)
-				if pe.info.IsDir() {
-					pinIcon = "📁"
-				}
-				parentPath := path.Dir(pe.relPath)
-				if parentPath == "." {
-					parentPath = ""
-				}
-				target := ""
-				if !pe.info.IsDir() && (strings.HasSuffix(strings.ToLower(pinName), ".md") || isPreviewableFile(pinName)) {
-					target = ` target="_blank" rel="noopener noreferrer"`
-				}
-
-				sb.WriteString(`<div class="pin-item">`)
-				sb.WriteString(`<span class="pin-item-icon">` + pinIcon + `</span>`)
-				sb.WriteString(`<div class="pin-item-info">`)
-				sb.WriteString(`<a href="` + pinHref + `" class="pin-item-name"` + target + `>` + html.EscapeString(pinName) + `</a>`)
-				if parentPath != "" {
-					sb.WriteString(`<div class="pin-item-path">` + html.EscapeString("/"+parentPath) + `</div>`)
-				}
-				sb.WriteString(`</div>`)
-				sb.WriteString(`<form method="POST" action="/pin" style="display:contents">`)
-				sb.WriteString(`<input type="hidden" name="action" value="unpin">`)
-				sb.WriteString(`<input type="hidden" name="path" value="` + html.EscapeString(pe.relPath) + `">`)
-				sb.WriteString(`<button type="submit" class="pin-item-unpin" title="取消固定">✕</button>`)
-				sb.WriteString(`</form>`)
-				sb.WriteString(`</div>`)
-			}
-			sb.WriteString(`</div></div>`)
-		}
-	}
+	// Pinned section — shown on all directory pages.
+	sb.WriteString(renderPinnedSection())
 
 	sb.WriteString(`<div class="card">`)
 	sb.WriteString(`<div class="card-header"><span class="card-header-title">📂 文件列表</span><span class="file-count">` + fmt.Sprintf("%d 项", len(files)) + `</span></div>`)
@@ -1508,6 +1570,8 @@ func renderMarkdown(w http.ResponseWriter, absPath, relPath string) {
 		editActionURL = "/" + urlEncodePath(relPath) + "?edit"
 	}
 
+	dlURL := "/" + urlEncodePath(relPath) + "?download=1"
+
 	fileName := filepath.Base(relPath)
 	escapedSource := html.EscapeString(string(content))
 
@@ -1560,6 +1624,9 @@ a:hover{text-decoration:underline}
 .btn-logout{color:rgba(255,255,255,.8);font-size:13px;padding:6px 12px;border-radius:20px;transition:background .2s,color .2s,transform .2s;-webkit-tap-highlight-color:transparent;touch-action:manipulation}
 .btn-logout:hover{background:rgba(255,255,255,.15);text-decoration:none;color:#fff}
 .btn-logout:active{background:rgba(255,255,255,.25);transform:scale(.96)}
+.btn-dl{color:#fff;background:rgba(255,255,255,.15);border:1px solid rgba(255,255,255,.25);padding:6px 14px;border-radius:20px;font-size:13px;transition:background .2s,transform .2s;white-space:nowrap;-webkit-tap-highlight-color:transparent;touch-action:manipulation}
+.btn-dl:hover{background:rgba(255,255,255,.25);text-decoration:none}
+.btn-dl:active{background:rgba(255,255,255,.35);transform:scale(.96)}
 .btn-edit{color:#fff;background:rgba(255,255,255,.15);border:1px solid rgba(255,255,255,.25);padding:6px 14px;border-radius:20px;font-size:13px;cursor:pointer;transition:background .2s,transform .2s;white-space:nowrap;-webkit-tap-highlight-color:transparent;touch-action:manipulation}
 .btn-edit:hover{background:rgba(255,255,255,.25)}
 .btn-edit:active{background:rgba(255,255,255,.35);transform:scale(.96)}
@@ -1618,7 +1685,7 @@ a:hover{text-decoration:underline}
   .header-brand{display:none}
   .header-title{max-width:120px}
   .header-right{gap:6px}
-  .btn-back,.btn-edit,.btn-save,.btn-cancel,.btn-pin-md{padding:8px 14px;font-size:13px}
+  .btn-back,.btn-dl,.btn-edit,.btn-save,.btn-cancel,.btn-pin-md{padding:8px 14px;font-size:13px}
   .btn-logout{padding:8px 12px;font-size:13px}
   .wrapper{padding:0 8px 32px;margin:12px auto}
   .md-card{padding:24px 16px;border-radius:10px}
@@ -1639,6 +1706,7 @@ a:hover{text-decoration:underline}
   <div class="header-right">
     <a href="%s" id="btn-back" class="btn-back">← 返回</a>
     %s
+    <a href="%s" id="btn-dl" class="btn-dl">⬇ 下载</a>
     <button id="btn-edit" class="btn-edit" onclick="startEdit()">✏️ 编辑</button>
     <button id="btn-save" class="btn-save" style="display:none" onclick="document.getElementById('edit-form').submit()">💾 保存</button>
     <button id="btn-cancel" class="btn-cancel" style="display:none" onclick="cancelEdit()">✕ 取消</button>
@@ -1663,6 +1731,7 @@ function startEdit(){
   document.getElementById('md-editor').focus();
   document.getElementById('btn-edit').style.display='none';
   document.getElementById('btn-back').style.display='none';
+  document.getElementById('btn-dl').style.display='none';
   document.getElementById('btn-pin').style.display='none';
   document.getElementById('btn-save').style.display='';
   document.getElementById('btn-cancel').style.display='';
@@ -1672,6 +1741,7 @@ function cancelEdit(){
   document.getElementById('edit-form').style.display='none';
   document.getElementById('btn-edit').style.display='';
   document.getElementById('btn-back').style.display='';
+  document.getElementById('btn-dl').style.display='';
   document.getElementById('btn-pin').style.display='';
   document.getElementById('btn-save').style.display='none';
   document.getElementById('btn-cancel').style.display='none';
@@ -1683,6 +1753,7 @@ if('serviceWorker' in navigator){navigator.serviceWorker.register('/sw.js').catc
 		html.EscapeString(fileName),
 		parentURL,
 		pinForm,
+		html.EscapeString(dlURL),
 		rendered.String(),
 		editActionURL,
 		escapedSource,
