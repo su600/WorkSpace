@@ -398,9 +398,24 @@ func renderPinnedSection() string {
 		if !isUnder(absPin, cfgDirectory) {
 			continue
 		}
-		if info, err := os.Stat(absPin); err == nil {
-			pinEntries = append(pinEntries, pinnedEntry{pin, info})
+
+		info, err := os.Lstat(absPin)
+		if err != nil {
+			continue
 		}
+
+		if info.Mode()&os.ModeSymlink != 0 {
+			resolvedPin, err := filepath.EvalSymlinks(absPin)
+			if err != nil || !isUnder(resolvedPin, cfgDirectory) {
+				continue
+			}
+			info, err = os.Stat(resolvedPin)
+			if err != nil {
+				continue
+			}
+		}
+
+		pinEntries = append(pinEntries, pinnedEntry{pin, info})
 	}
 	if len(pinEntries) == 0 {
 		return ""
