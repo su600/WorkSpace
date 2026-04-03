@@ -436,7 +436,7 @@ func renderPinnedSection() string {
 		sb.WriteString(`<form method="POST" action="/pin" style="display:contents">`)
 		sb.WriteString(`<input type="hidden" name="action" value="unpin">`)
 		sb.WriteString(`<input type="hidden" name="path" value="` + html.EscapeString(pe.relPath) + `">`)
-		sb.WriteString(`<button type="submit" class="pin-item-unpin" title="取消固定">✕</button>`)
+		sb.WriteString(`<button type="submit" class="pin-item-unpin" title="取消固定" aria-label="取消固定">✕</button>`)
 		sb.WriteString(`</form>`)
 		sb.WriteString(`</div>`)
 	}
