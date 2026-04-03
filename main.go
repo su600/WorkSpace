@@ -58,9 +58,14 @@ const (
 )
 
 // Pin storage — ordered list of pinned relative paths, persisted to disk.
+// pinCacheVer is bumped on every add/remove/load; renderPinnedSection caches its
+// rendered HTML against this version and skips re-statting on unchanged lists.
 var (
-	pinMu       sync.RWMutex
-	pinnedPaths []string
+	pinMu          sync.RWMutex
+	pinnedPaths    []string
+	pinCacheVer    uint64 // incremented whenever pinnedPaths changes
+	pinCachedVer   uint64 // version at which pinCachedHTML was last computed
+	pinCachedHTML  string // cached render output; valid when pinCachedVer == pinCacheVer
 )
 
 var mtimeLocation = time.FixedZone("Asia/Shanghai", 8*3600)
@@ -284,6 +289,7 @@ func loadPins() {
 	}
 	pinMu.Lock()
 	pinnedPaths = valid
+	pinCacheVer++
 	pinMu.Unlock()
 }
 
@@ -382,10 +388,18 @@ const pinnedSectionCSS = `.pinned-card{margin-bottom:12px}` +
 	`}`
 
 // renderPinnedSection returns the HTML for the pinned section card, or "" if there are no valid pins.
+// The result is cached in memory and only recomputed when the pin list version changes.
 func renderPinnedSection() string {
+	// Fast path: return cached HTML if the pin list hasn't changed.
 	pinMu.RLock()
+	if pinCachedVer == pinCacheVer {
+		h := pinCachedHTML
+		pinMu.RUnlock()
+		return h
+	}
 	pins := make([]string, len(pinnedPaths))
 	copy(pins, pinnedPaths)
+	ver := pinCacheVer
 	pinMu.RUnlock()
 
 	type pinnedEntry struct {
@@ -417,46 +431,61 @@ func renderPinnedSection() string {
 
 		pinEntries = append(pinEntries, pinnedEntry{pin, info})
 	}
-	if len(pinEntries) == 0 {
-		return ""
+
+	var rendered string
+	if len(pinEntries) > 0 {
+		var sb strings.Builder
+		sb.WriteString(`<div class="card pinned-card">`)
+		sb.WriteString(`<div class="card-header"><span class="card-header-title">📌 已固定</span><span class="file-count">` + fmt.Sprintf("%d 项", len(pinEntries)) + `</span></div>`)
+		sb.WriteString(`<div class="pinned-grid">`)
+		for _, pe := range pinEntries {
+			pinName := path.Base(pe.relPath)
+			pinHref := "/" + urlEncodePath(pe.relPath)
+			pinIcon := fileIcon(pinName)
+			if pe.info.IsDir() {
+				pinIcon = "📁"
+			}
+			parentPath := path.Dir(pe.relPath)
+			if parentPath == "." {
+				parentPath = ""
+			}
+			target := ""
+			if !pe.info.IsDir() && (strings.HasSuffix(strings.ToLower(pinName), ".md") || isPreviewableFile(pinName)) {
+				target = ` target="_blank" rel="noopener noreferrer"`
+			}
+			sb.WriteString(`<div class="pin-item">`)
+			sb.WriteString(`<span class="pin-item-icon">` + pinIcon + `</span>`)
+			sb.WriteString(`<div class="pin-item-info">`)
+			sb.WriteString(`<a href="` + pinHref + `" class="pin-item-name"` + target + `>` + html.EscapeString(pinName) + `</a>`)
+			if parentPath != "" {
+				sb.WriteString(`<div class="pin-item-path">` + html.EscapeString("/"+parentPath) + `</div>`)
+			}
+			sb.WriteString(`</div>`)
+			sb.WriteString(`<form method="POST" action="/pin" style="display:contents">`)
+			sb.WriteString(`<input type="hidden" name="action" value="unpin">`)
+			sb.WriteString(`<input type="hidden" name="path" value="` + html.EscapeString(pe.relPath) + `">`)
+			sb.WriteString(`<button type="submit" class="pin-item-unpin" title="取消固定" aria-label="取消固定">✕</button>`)
+			sb.WriteString(`</form>`)
+			sb.WriteString(`</div>`)
+		}
+		sb.WriteString(`</div></div>`)
+		rendered = sb.String()
 	}
 
-	var sb strings.Builder
-	sb.WriteString(`<div class="card pinned-card">`)
-	sb.WriteString(`<div class="card-header"><span class="card-header-title">📌 已固定</span><span class="file-count">` + fmt.Sprintf("%d 项", len(pinEntries)) + `</span></div>`)
-	sb.WriteString(`<div class="pinned-grid">`)
-	for _, pe := range pinEntries {
-		pinName := path.Base(pe.relPath)
-		pinHref := "/" + urlEncodePath(pe.relPath)
-		pinIcon := fileIcon(pinName)
-		if pe.info.IsDir() {
-			pinIcon = "📁"
-		}
-		parentPath := path.Dir(pe.relPath)
-		if parentPath == "." {
-			parentPath = ""
-		}
-		target := ""
-		if !pe.info.IsDir() && (strings.HasSuffix(strings.ToLower(pinName), ".md") || isPreviewableFile(pinName)) {
-			target = ` target="_blank" rel="noopener noreferrer"`
-		}
-		sb.WriteString(`<div class="pin-item">`)
-		sb.WriteString(`<span class="pin-item-icon">` + pinIcon + `</span>`)
-		sb.WriteString(`<div class="pin-item-info">`)
-		sb.WriteString(`<a href="` + pinHref + `" class="pin-item-name"` + target + `>` + html.EscapeString(pinName) + `</a>`)
-		if parentPath != "" {
-			sb.WriteString(`<div class="pin-item-path">` + html.EscapeString("/"+parentPath) + `</div>`)
-		}
-		sb.WriteString(`</div>`)
-		sb.WriteString(`<form method="POST" action="/pin" style="display:contents">`)
-		sb.WriteString(`<input type="hidden" name="action" value="unpin">`)
-		sb.WriteString(`<input type="hidden" name="path" value="` + html.EscapeString(pe.relPath) + `">`)
-		sb.WriteString(`<button type="submit" class="pin-item-unpin" title="取消固定" aria-label="取消固定">✕</button>`)
-		sb.WriteString(`</form>`)
-		sb.WriteString(`</div>`)
+	// Store in cache; only update if the version hasn't been bumped while we computed.
+	// If it was bumped and another goroutine has already cached the newer result, use that.
+	// Otherwise leave the cache empty for the next request to fill with the latest state.
+	pinMu.Lock()
+	if pinCacheVer == ver {
+		pinCachedVer = ver
+		pinCachedHTML = rendered
+	} else if pinCachedVer == pinCacheVer {
+		// A newer version was computed and cached by another goroutine; return it.
+		rendered = pinCachedHTML
 	}
-	sb.WriteString(`</div></div>`)
-	return sb.String()
+	pinMu.Unlock()
+
+	return rendered
 }
 
 func addPin(relPath string) {
@@ -468,20 +497,26 @@ func addPin(relPath string) {
 		}
 	}
 	pinnedPaths = append(pinnedPaths, relPath)
+	pinCacheVer++
 	pinMu.Unlock()
 	savePins()
 }
 
 func removePin(relPath string) {
 	pinMu.Lock()
+	removed := false
 	for i, p := range pinnedPaths {
 		if p == relPath {
 			pinnedPaths = append(pinnedPaths[:i], pinnedPaths[i+1:]...)
+			pinCacheVer++
+			removed = true
 			break
 		}
 	}
 	pinMu.Unlock()
-	savePins()
+	if removed {
+		savePins()
+	}
 }
 
 func envOrDefault(key, def string) string {
