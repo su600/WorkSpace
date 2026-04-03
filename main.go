@@ -2048,6 +2048,7 @@ func serveDownload(w http.ResponseWriter, r *http.Request, absPath string) {
 	fileName := url.PathEscape(filepath.Base(absPath))
 	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename*=UTF-8''%s`, fileName))
 	w.Header().Set("Content-Type", "application/octet-stream")
+	w.Header().Set("Cache-Control", "no-store")
 	http.ServeFile(w, r, absPath)
 }
 
