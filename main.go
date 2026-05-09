@@ -939,6 +939,9 @@ a:hover{text-decoration:underline}
 .header-logo{font-size:20px;flex-shrink:0}
 .header-brand{font-size:15px;font-weight:700;letter-spacing:.5px;white-space:nowrap}
 .header-right{display:flex;align-items:center;gap:8px;flex:1;justify-content:flex-end;min-width:0}
+.header-info{display:flex;align-items:center;gap:6px;font-size:12px;color:rgba(255,255,255,.9);white-space:nowrap;flex-shrink:0}
+.header-clock{font-variant-numeric:tabular-nums;letter-spacing:.3px}
+.header-sep{opacity:.4;padding:0 2px}
 .btn-logout{color:#fff;background:rgba(255,255,255,.15);border:1px solid rgba(255,255,255,.25);padding:6px 14px;border-radius:20px;font-size:13px;cursor:pointer;transition:background .2s,transform .2s;white-space:nowrap;flex-shrink:0;-webkit-tap-highlight-color:transparent;touch-action:manipulation}
 .btn-logout:hover{background:rgba(255,255,255,.25);text-decoration:none}
 .btn-logout:active{background:rgba(255,255,255,.35);transform:scale(.96)}
@@ -1015,6 +1018,7 @@ a:hover{text-decoration:underline}
       <input type="text" name="q" placeholder="搜索文件名…" value="` + html.EscapeString(query) + `" autofocus>
       <button type="submit">搜索</button>
     </form>
+    <div class="header-info"><span id="hdr-weather"></span><span class="header-sep">|</span><span class="header-clock" id="hdr-clock"></span></div>
     <a href="/" class="btn-logout">🏠 根目录</a>
     <a href="/logout" class="btn-logout">退出登录</a>
   </div>
@@ -1094,7 +1098,7 @@ a:hover{text-decoration:underline}
 		sb.WriteString(`</tbody></table>`)
 	}
 
-	sb.WriteString(`</div></div><script>if('serviceWorker' in navigator){navigator.serviceWorker.register('/sw.js').catch(function(){});}</script></body></html>`)
+	sb.WriteString(`</div></div><script>if('serviceWorker' in navigator){navigator.serviceWorker.register('/sw.js').catch(function(){});}(function(){var cEl=document.getElementById('hdr-clock'),wEl=document.getElementById('hdr-weather');if(cEl){var fmt=new Intl.DateTimeFormat('zh-CN',{hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false,timeZone:'Asia/Shanghai'});function tick(){cEl.textContent=fmt.format(new Date())}tick();setInterval(tick,1000);}if(wEl){var _wk='ws_weather',_wt='ws_weather_ts',_ttl=30*60*1000,_cached=null,_ts=0;try{_cached=localStorage.getItem(_wk);_ts=parseInt(localStorage.getItem(_wt)||'0');}catch(e){}if(_cached&&Date.now()-_ts<_ttl){wEl.textContent=_cached;}else{fetch('https://wttr.in/Beijing?format=j1').then(function(r){if(!r.ok){throw new Error('HTTP '+r.status);}return r.json()}).then(function(d){if(!d.current_condition||!d.current_condition.length){wEl.textContent='\u5929\u6c14\u6682\u65e0\u6570\u636e';return;}var c=d.current_condition[0];var zh=c.lang_zh&&c.lang_zh[0];var txt='\u5317\u4eac '+(zh?zh.value:c.weatherDesc[0].value)+' '+c.temp_C+'\u00b0C';wEl.textContent=txt;try{localStorage.setItem(_wk,txt);localStorage.setItem(_wt,String(Date.now()));}catch(e2){}}).catch(function(){wEl.textContent='\u5929\u6c14\u6682\u65e0\u6570\u636e';});}}})();</script></body></html>`)
 	fmt.Fprint(w, sb.String())
 }
 
@@ -1280,6 +1284,9 @@ a:hover{text-decoration:underline}
 .header-brand{font-size:15px;font-weight:700;letter-spacing:.5px;white-space:nowrap}
 .header-title{font-size:13px;opacity:.85;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:200px}
 .header-right{display:flex;align-items:center;gap:8px;flex:1;justify-content:flex-end;min-width:0}
+.header-info{display:flex;align-items:center;gap:6px;font-size:12px;color:rgba(255,255,255,.9);white-space:nowrap;flex-shrink:0}
+.header-clock{font-variant-numeric:tabular-nums;letter-spacing:.3px}
+.header-sep{opacity:.4;padding:0 2px}
 .btn-logout{color:#fff;background:rgba(255,255,255,.15);border:1px solid rgba(255,255,255,.25);padding:6px 14px;border-radius:20px;font-size:13px;cursor:pointer;transition:background .2s,transform .2s;white-space:nowrap;flex-shrink:0;-webkit-tap-highlight-color:transparent;touch-action:manipulation}
 .btn-logout:hover{background:rgba(255,255,255,.25);text-decoration:none}
 .btn-logout:active{background:rgba(255,255,255,.35);transform:scale(.96)}
@@ -1394,6 +1401,7 @@ a:hover{text-decoration:underline}
       <input type="text" name="q" placeholder="搜索文件名…">
       <button type="submit">搜</button>
     </form>
+    <div class="header-info"><span id="hdr-weather"></span><span class="header-sep">|</span><span class="header-clock" id="hdr-clock"></span></div>
     <a href="/logout" class="btn-logout">退出登录</a>
   </div>
 </header>
@@ -1531,7 +1539,7 @@ a:hover{text-decoration:underline}
 		sb.WriteString(`</tbody></table>`)
 	}
 
-	sb.WriteString(`</div></div><script>if('serviceWorker' in navigator){navigator.serviceWorker.register('/sw.js').catch(function(){});}</script></body></html>`)
+	sb.WriteString(`</div></div><script>if('serviceWorker' in navigator){navigator.serviceWorker.register('/sw.js').catch(function(){});}(function(){var cEl=document.getElementById('hdr-clock'),wEl=document.getElementById('hdr-weather');if(cEl){var fmt=new Intl.DateTimeFormat('zh-CN',{hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false,timeZone:'Asia/Shanghai'});function tick(){cEl.textContent=fmt.format(new Date())}tick();setInterval(tick,1000);}if(wEl){var _wk='ws_weather',_wt='ws_weather_ts',_ttl=30*60*1000,_cached=null,_ts=0;try{_cached=localStorage.getItem(_wk);_ts=parseInt(localStorage.getItem(_wt)||'0');}catch(e){}if(_cached&&Date.now()-_ts<_ttl){wEl.textContent=_cached;}else{fetch('https://wttr.in/Beijing?format=j1').then(function(r){if(!r.ok){throw new Error('HTTP '+r.status);}return r.json()}).then(function(d){if(!d.current_condition||!d.current_condition.length){wEl.textContent='\u5929\u6c14\u6682\u65e0\u6570\u636e';return;}var c=d.current_condition[0];var zh=c.lang_zh&&c.lang_zh[0];var txt='\u5317\u4eac '+(zh?zh.value:c.weatherDesc[0].value)+' '+c.temp_C+'\u00b0C';wEl.textContent=txt;try{localStorage.setItem(_wk,txt);localStorage.setItem(_wt,String(Date.now()));}catch(e2){}}).catch(function(){wEl.textContent='\u5929\u6c14\u6682\u65e0\u6570\u636e';});}}})();</script></body></html>`)
 	fmt.Fprint(w, sb.String())
 }
 
@@ -1618,6 +1626,9 @@ a:hover{text-decoration:underline}
 .header-brand{font-size:15px;font-weight:700;letter-spacing:.5px;white-space:nowrap}
 .header-title{font-size:13px;opacity:.85;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:200px}
 .header-right{display:flex;align-items:center;gap:8px;flex-shrink:0}
+.header-info{display:flex;align-items:center;gap:6px;font-size:12px;color:rgba(255,255,255,.9);white-space:nowrap;flex-shrink:0}
+.header-clock{font-variant-numeric:tabular-nums;letter-spacing:.3px}
+.header-sep{opacity:.4;padding:0 2px}
 .btn-back{color:#fff;background:rgba(255,255,255,.15);border:1px solid rgba(255,255,255,.25);padding:6px 14px;border-radius:20px;font-size:13px;transition:background .2s,transform .2s;white-space:nowrap;-webkit-tap-highlight-color:transparent;touch-action:manipulation}
 .btn-back:hover{background:rgba(255,255,255,.25);text-decoration:none}
 .btn-back:active{background:rgba(255,255,255,.35);transform:scale(.96)}
@@ -1710,6 +1721,7 @@ a:hover{text-decoration:underline}
     <button id="btn-edit" class="btn-edit" onclick="startEdit()">✏️ 编辑</button>
     <button id="btn-save" class="btn-save" style="display:none" onclick="document.getElementById('edit-form').submit()">💾 保存</button>
     <button id="btn-cancel" class="btn-cancel" style="display:none" onclick="cancelEdit()">✕ 取消</button>
+    <div class="header-info"><span id="hdr-weather"></span><span class="header-sep">|</span><span class="header-clock" id="hdr-clock"></span></div>
     <a href="/logout" class="btn-logout">退出</a>
   </div>
 </header>
@@ -1747,6 +1759,7 @@ function cancelEdit(){
   document.getElementById('btn-cancel').style.display='none';
 }
 if('serviceWorker' in navigator){navigator.serviceWorker.register('/sw.js').catch(function(){});}
+(function(){var cEl=document.getElementById('hdr-clock'),wEl=document.getElementById('hdr-weather');if(cEl){var fmt=new Intl.DateTimeFormat('zh-CN',{hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false,timeZone:'Asia/Shanghai'});function tick(){cEl.textContent=fmt.format(new Date())}tick();setInterval(tick,1000);}if(wEl){var _wk='ws_weather',_wt='ws_weather_ts',_ttl=30*60*1000,_cached=null,_ts=0;try{_cached=localStorage.getItem(_wk);_ts=parseInt(localStorage.getItem(_wt)||'0');}catch(e){}if(_cached&&Date.now()-_ts<_ttl){wEl.textContent=_cached;}else{fetch('https://wttr.in/Beijing?format=j1').then(function(r){if(!r.ok){throw new Error('HTTP '+r.status);}return r.json()}).then(function(d){if(!d.current_condition||!d.current_condition.length){wEl.textContent='\u5929\u6c14\u6682\u65e0\u6570\u636e';return;}var c=d.current_condition[0];var zh=c.lang_zh&&c.lang_zh[0];var txt='\u5317\u4eac '+(zh?zh.value:c.weatherDesc[0].value)+' '+c.temp_C+'\u00b0C';wEl.textContent=txt;try{localStorage.setItem(_wk,txt);localStorage.setItem(_wt,String(Date.now()));}catch(e2){}}).catch(function(){wEl.textContent='\u5929\u6c14\u6682\u65e0\u6570\u636e';});}}})();
 </script>
 </body></html>`,
 		html.EscapeString(fileName),
@@ -1819,6 +1832,9 @@ a:hover{text-decoration:underline}
 .header-brand{font-size:15px;font-weight:700;letter-spacing:.5px;white-space:nowrap}
 .header-title{font-size:13px;opacity:.85;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:200px}
 .header-right{display:flex;align-items:center;gap:8px;flex-shrink:0}
+.header-info{display:flex;align-items:center;gap:6px;font-size:12px;color:rgba(255,255,255,.9);white-space:nowrap;flex-shrink:0}
+.header-clock{font-variant-numeric:tabular-nums;letter-spacing:.3px}
+.header-sep{opacity:.4;padding:0 2px}
 .btn-back{color:#fff;background:rgba(255,255,255,.2);border:1px solid rgba(255,255,255,.3);padding:5px 12px;border-radius:20px;font-size:12px;transition:background .15s;white-space:nowrap}
 .btn-back:hover{background:rgba(255,255,255,.3);text-decoration:none}
 .btn-dl{color:#fff;background:rgba(255,255,255,.2);border:1px solid rgba(255,255,255,.3);padding:5px 12px;border-radius:20px;font-size:12px;transition:background .15s;white-space:nowrap}
@@ -1841,7 +1857,8 @@ a:hover{text-decoration:underline}
     <span class="header-title">%s</span>
   </div>
   <div class="header-right">
-    <a href="%s" class="btn-back">← 返回</a>`,
+    <a href="%s" class="btn-back">← 返回</a>
+    <div class="header-info"><span id="hdr-weather"></span><span class="header-sep">|</span><span class="header-clock" id="hdr-clock"></span></div>`,
 		icon,
 		html.EscapeString(fileName),
 		parentURL,
@@ -1879,7 +1896,7 @@ func previewPDF(w http.ResponseWriter, absPath, relPath string) {
 <div class="pdf-wrapper">
   <iframe src="` + html.EscapeString(rawURL) + `" title="PDF preview: ` + html.EscapeString(fileName) + `"></iframe>
 </div>
-<script>if('serviceWorker' in navigator){navigator.serviceWorker.register('/sw.js').catch(function(){});}</script>
+<script>if('serviceWorker' in navigator){navigator.serviceWorker.register('/sw.js').catch(function(){});}(function(){var cEl=document.getElementById('hdr-clock'),wEl=document.getElementById('hdr-weather');if(cEl){var fmt=new Intl.DateTimeFormat('zh-CN',{hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false,timeZone:'Asia/Shanghai'});function tick(){cEl.textContent=fmt.format(new Date())}tick();setInterval(tick,1000);}if(wEl){var _wk='ws_weather',_wt='ws_weather_ts',_ttl=30*60*1000,_cached=null,_ts=0;try{_cached=localStorage.getItem(_wk);_ts=parseInt(localStorage.getItem(_wt)||'0');}catch(e){}if(_cached&&Date.now()-_ts<_ttl){wEl.textContent=_cached;}else{fetch('https://wttr.in/Beijing?format=j1').then(function(r){if(!r.ok){throw new Error('HTTP '+r.status);}return r.json()}).then(function(d){if(!d.current_condition||!d.current_condition.length){wEl.textContent='\u5929\u6c14\u6682\u65e0\u6570\u636e';return;}var c=d.current_condition[0];var zh=c.lang_zh&&c.lang_zh[0];var txt='\u5317\u4eac '+(zh?zh.value:c.weatherDesc[0].value)+' '+c.temp_C+'\u00b0C';wEl.textContent=txt;try{localStorage.setItem(_wk,txt);localStorage.setItem(_wt,String(Date.now()));}catch(e2){}}).catch(function(){wEl.textContent='\u5929\u6c14\u6682\u65e0\u6570\u636e';});}}})();</script>
 </body></html>`)
 	fmt.Fprint(w, sb.String())
 }
@@ -1977,7 +1994,7 @@ func previewText(w http.ResponseWriter, absPath, relPath string) {
 		sb.WriteString(`<div class="truncated">⚠️ 文件过大，仅显示前 1 MiB 内容。请下载查看完整文件。</div>`)
 	}
 	sb.WriteString(`</div></div>
-<script>if('serviceWorker' in navigator){navigator.serviceWorker.register('/sw.js').catch(function(){});}</script>
+<script>if('serviceWorker' in navigator){navigator.serviceWorker.register('/sw.js').catch(function(){});}(function(){var cEl=document.getElementById('hdr-clock'),wEl=document.getElementById('hdr-weather');if(cEl){var fmt=new Intl.DateTimeFormat('zh-CN',{hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false,timeZone:'Asia/Shanghai'});function tick(){cEl.textContent=fmt.format(new Date())}tick();setInterval(tick,1000);}if(wEl){var _wk='ws_weather',_wt='ws_weather_ts',_ttl=30*60*1000,_cached=null,_ts=0;try{_cached=localStorage.getItem(_wk);_ts=parseInt(localStorage.getItem(_wt)||'0');}catch(e){}if(_cached&&Date.now()-_ts<_ttl){wEl.textContent=_cached;}else{fetch('https://wttr.in/Beijing?format=j1').then(function(r){if(!r.ok){throw new Error('HTTP '+r.status);}return r.json()}).then(function(d){if(!d.current_condition||!d.current_condition.length){wEl.textContent='\u5929\u6c14\u6682\u65e0\u6570\u636e';return;}var c=d.current_condition[0];var zh=c.lang_zh&&c.lang_zh[0];var txt='\u5317\u4eac '+(zh?zh.value:c.weatherDesc[0].value)+' '+c.temp_C+'\u00b0C';wEl.textContent=txt;try{localStorage.setItem(_wk,txt);localStorage.setItem(_wt,String(Date.now()));}catch(e2){}}).catch(function(){wEl.textContent='\u5929\u6c14\u6682\u65e0\u6570\u636e';});}}})();</script>
 </body></html>`)
 	fmt.Fprint(w, sb.String())
 }
@@ -2027,6 +2044,7 @@ img.onload=function(){
   info.textContent=baseName+' — '+img.naturalWidth+'×'+img.naturalHeight;
 };
 if('serviceWorker' in navigator){navigator.serviceWorker.register('/sw.js').catch(function(){});}
+(function(){var cEl=document.getElementById('hdr-clock'),wEl=document.getElementById('hdr-weather');if(cEl){var fmt=new Intl.DateTimeFormat('zh-CN',{hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false,timeZone:'Asia/Shanghai'});function tick(){cEl.textContent=fmt.format(new Date())}tick();setInterval(tick,1000);}if(wEl){var _wk='ws_weather',_wt='ws_weather_ts',_ttl=30*60*1000,_cached=null,_ts=0;try{_cached=localStorage.getItem(_wk);_ts=parseInt(localStorage.getItem(_wt)||'0');}catch(e){}if(_cached&&Date.now()-_ts<_ttl){wEl.textContent=_cached;}else{fetch('https://wttr.in/Beijing?format=j1').then(function(r){if(!r.ok){throw new Error('HTTP '+r.status);}return r.json()}).then(function(d){if(!d.current_condition||!d.current_condition.length){wEl.textContent='\u5929\u6c14\u6682\u65e0\u6570\u636e';return;}var c=d.current_condition[0];var zh=c.lang_zh&&c.lang_zh[0];var txt='\u5317\u4eac '+(zh?zh.value:c.weatherDesc[0].value)+' '+c.temp_C+'\u00b0C';wEl.textContent=txt;try{localStorage.setItem(_wk,txt);localStorage.setItem(_wt,String(Date.now()));}catch(e2){}}).catch(function(){wEl.textContent='\u5929\u6c14\u6682\u65e0\u6570\u636e';});}}})();
 </script>
 </body></html>`)
 	fmt.Fprint(w, sb.String())
