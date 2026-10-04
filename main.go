@@ -40,7 +40,8 @@ var (
 	cfgDirectory    string
 	cfgUsername     string
 	cfgPassword     string
-	cfgSecureCookie bool // set PORTAL_TLS=true when served over HTTPS
+	cfgSecureCookie bool   // set PORTAL_TLS=true when served over HTTPS
+	cfgPinAPIToken  string // optional bearer token for trusted chat/API clients
 )
 
 // Session management — in-memory token store.
@@ -61,11 +62,11 @@ const (
 // pinCacheVer is bumped on every add/remove/load; renderPinnedSection caches its
 // rendered HTML against this version and skips re-statting on unchanged lists.
 var (
-	pinMu          sync.RWMutex
-	pinnedPaths    []string
-	pinCacheVer    uint64 // incremented whenever pinnedPaths changes
-	pinCachedVer   uint64 // version at which pinCachedHTML was last computed
-	pinCachedHTML  string // cached render output; valid when pinCachedVer == pinCacheVer
+	pinMu         sync.RWMutex
+	pinnedPaths   []string
+	pinCacheVer   uint64 // incremented whenever pinnedPaths changes
+	pinCachedVer  uint64 // version at which pinCachedHTML was last computed
+	pinCachedHTML string // cached render output; valid when pinCachedVer == pinCacheVer
 )
 
 var mtimeLocation = time.FixedZone("Asia/Shanghai", 8*3600)
@@ -544,6 +545,7 @@ func main() {
 	cfgUsername = envOrDefault("PORTAL_USER", "su600")
 	cfgPassword = envOrDefault("PORTAL_PASS", "password123")
 	cfgSecureCookie = strings.EqualFold(os.Getenv("PORTAL_TLS"), "true")
+	cfgPinAPIToken = os.Getenv("PORTAL_PIN_API_TOKEN")
 
 	rawDir := envOrDefault("PORTAL_DIR", "/root/.openclaw/workspace")
 	absDir, err := filepath.Abs(rawDir)
@@ -574,6 +576,7 @@ func main() {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/login", loginHandler)
 	mux.HandleFunc("/pin", pinHandler)
+	mux.HandleFunc("/api/pins", pinsAPIHandler)
 	mux.HandleFunc("/search", searchHandler)
 	mux.HandleFunc("/", handler)
 	addr := ":" + cfgPort
@@ -1100,16 +1103,83 @@ a:hover{text-decoration:underline}
 
 // ─── Pin handler ──────────────────────────────────────────────────────────────
 
+func writeJSON(w http.ResponseWriter, status int, value any) {
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
+	w.WriteHeader(status)
+	if err := json.NewEncoder(w).Encode(value); err != nil {
+		log.Printf("pin: write JSON response: %v", err)
+	}
+}
+
+func apiTokenAuthorized(r *http.Request) bool {
+	if cfgPinAPIToken == "" {
+		return false
+	}
+	scheme, token, ok := strings.Cut(r.Header.Get("Authorization"), " ")
+	if !ok || !strings.EqualFold(scheme, "Bearer") {
+		return false
+	}
+	token = strings.TrimSpace(token)
+	return subtle.ConstantTimeCompare([]byte(token), []byte(cfgPinAPIToken)) == 1
+}
+
+func pinsAPIHandler(w http.ResponseWriter, r *http.Request) {
+	if !validateSession(r) && !apiTokenAuthorized(r) {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+		return
+	}
+	if r.Method != http.MethodGet {
+		w.Header().Set("Allow", http.MethodGet)
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+		return
+	}
+	pinMu.RLock()
+	pins := append([]string{}, pinnedPaths...)
+	pinMu.RUnlock()
+	writeJSON(w, http.StatusOK, map[string]any{"pins": pins})
+}
+
 func pinHandler(w http.ResponseWriter, r *http.Request) {
-	if !validateSession(r) {
+	isJSON := strings.Contains(strings.ToLower(r.Header.Get("Content-Type")), "application/json")
+	authorized := validateSession(r)
+	if !authorized && isJSON {
+		authorized = apiTokenAuthorized(r)
+	}
+	if !authorized {
+		if strings.HasPrefix(r.Header.Get("Accept"), "application/json") || isJSON {
+			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+			return
+		}
 		http.Redirect(w, r, "/login", http.StatusSeeOther)
 		return
 	}
 	if r.Method != http.MethodPost {
+		w.Header().Set("Allow", http.MethodPost)
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	if err := r.ParseForm(); err != nil {
+	if isJSON {
+		r.Body = http.MaxBytesReader(w, r.Body, 64*1024)
+		var payload struct {
+			Action string `json:"action"`
+			Path   string `json:"path"`
+		}
+		decoder := json.NewDecoder(r.Body)
+		if err := decoder.Decode(&payload); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON body"})
+			return
+		}
+		if err := decoder.Decode(&struct{}{}); err != io.EOF {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "request must contain one JSON object"})
+			return
+		}
+		if payload.Action == "" || payload.Path == "" {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "action and path are required"})
+			return
+		}
+		r.Form = url.Values{"action": {payload.Action}, "path": {payload.Path}}
+	} else if err := r.ParseForm(); err != nil {
 		http.Error(w, "Bad request", http.StatusBadRequest)
 		return
 	}
@@ -1123,19 +1193,51 @@ func pinHandler(w http.ResponseWriter, r *http.Request) {
 		relPath = ""
 	}
 	if relPath == "" || strings.HasPrefix(relPath, "../") || relPath == ".." {
-		http.Error(w, "Access denied", http.StatusForbidden)
+		if isJSON {
+			writeJSON(w, http.StatusForbidden, map[string]string{"error": "invalid workspace path"})
+		} else {
+			http.Error(w, "Access denied", http.StatusForbidden)
+		}
 		return
 	}
 
 	absPath := filepath.Join(cfgDirectory, filepath.FromSlash(relPath))
 	if !isUnder(absPath, cfgDirectory) {
-		http.Error(w, "Access denied", http.StatusForbidden)
+		if isJSON {
+			writeJSON(w, http.StatusForbidden, map[string]string{"error": "path is outside workspace"})
+		} else {
+			http.Error(w, "Access denied", http.StatusForbidden)
+		}
+		return
+	}
+	if action != "pin" && action != "unpin" {
+		if isJSON {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "action must be pin or unpin"})
+		} else {
+			http.Error(w, "Bad request", http.StatusBadRequest)
+		}
 		return
 	}
 	if action == "pin" {
-		if _, err := os.Stat(absPath); err != nil {
-			http.Error(w, "File not found", http.StatusNotFound)
+		info, err := os.Lstat(absPath)
+		if err != nil {
+			if isJSON {
+				writeJSON(w, http.StatusNotFound, map[string]string{"error": "file not found"})
+			} else {
+				http.Error(w, "File not found", http.StatusNotFound)
+			}
 			return
+		}
+		if info.Mode()&os.ModeSymlink != 0 {
+			resolved, err := filepath.EvalSymlinks(absPath)
+			if err != nil || !isUnder(resolved, cfgDirectory) {
+				if isJSON {
+					writeJSON(w, http.StatusForbidden, map[string]string{"error": "path resolves outside workspace"})
+				} else {
+					http.Error(w, "Access denied", http.StatusForbidden)
+				}
+				return
+			}
 		}
 	}
 
@@ -1146,6 +1248,15 @@ func pinHandler(w http.ResponseWriter, r *http.Request) {
 		removePin(relPath)
 	default:
 		http.Error(w, "Bad request", http.StatusBadRequest)
+		return
+	}
+
+	if isJSON {
+		writeJSON(w, http.StatusOK, map[string]any{
+			"ok":     true,
+			"action": action,
+			"path":   relPath,
+		})
 		return
 	}
 

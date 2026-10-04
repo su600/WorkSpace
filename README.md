@@ -12,6 +12,7 @@
 - 👁️ 文件预览：PDF 内嵌浏览、图片缩放查看、文本/代码带行号显示（暂不支持语法高亮）
 - 🔍 名称搜索（按文件名与目录名搜索，最多返回 500 条结果）
 - 📌 文件 / 目录收藏（置顶常用路径，持久化保存）
+- 🤖 JSON API：认证后通过 `POST /pin` 的 JSON 请求固定或取消固定文件，供聊天代理 / 自动化调用（详见下文）
 - 📥 文件下载
 - 🔒 自定义登录页面，基于安全会话 Cookie 认证（默认 24 小时，勾选"记住我"延长至 30 天）
 - 📱 响应式布局，完美适配手机访问
@@ -68,6 +69,36 @@ docker run -d \
   workspace-portal
 ```
 
+## Pin API（供聊天代理调用）
+
+`POST /pin` 在原有表单接口基础上同时支持 JSON。可使用 Workspace 登录会话 Cookie；聊天代理也可配置专用 Bearer token，通过 `PORTAL_PIN_API_TOKEN` 设置。该密钥只用于固定 API，不应放入聊天指令或公开脚本。
+
+请求示例：
+
+```http
+POST /pin
+Content-Type: application/json
+Authorization: Bearer <PORTAL_PIN_API_TOKEN>
+
+{"action":"pin","path":"files/docs/example.md"}
+```
+
+- 固定：`{"action":"pin","path":"相对工作区的文件或目录路径"}`
+- 取消固定：`{"action":"unpin","path":"相对工作区的文件或目录路径"}`
+- 成功：`200 {"ok":true,"action":"pin","path":"files/docs/example.md"}`。路径必须相对工作区根目录，且目标必须存在。
+- 未授权：`401 {"error":"unauthorized"}`；请求格式或路径无效返回相应 `4xx` JSON 错误。
+- 查询已固定列表：`GET /api/pins`，同样支持登录 Cookie 或 Bearer token，返回 `{"pins":["files/docs/example.md"]}`。
+- 浏览器现有表单调用继续重定向，保持兼容。
+
+curl 示例（推荐使用专用 API token；服务应只在受信网络或 HTTPS 下访问）：
+
+```bash
+curl -X POST http://localhost:3000/pin \\
+  -H 'Content-Type: application/json' \\
+  -H 'Authorization: Bearer <PORTAL_PIN_API_TOKEN>' \\
+  -d '{"action":"pin","path":"files/docs/example.md"}'
+```
+
 ## 环境变量
 
 | 变量 | 默认值 | 说明 |
@@ -77,6 +108,7 @@ docker run -d \
 | `PORTAL_USER` | `su600` | 登录用户名（**生产环境请务必修改**） |
 | `PORTAL_PASS` | `password123` | 登录密码（**生产环境请务必修改**） |
 | `PORTAL_TLS` | `false` | 设为 `true` 启用 Cookie Secure 属性（部署在 HTTPS 后端时使用） |
+| `PORTAL_PIN_API_TOKEN` | 空（禁用 Bearer 认证） | 为聊天代理/API 客户端配置的独立固定接口密钥；使用长随机值并通过安全的部署密钥管理注入 |
 
 > ⚠️ **安全提示**：`PORTAL_USER` 和 `PORTAL_PASS` 均有内置默认值，任何知道默认值的人都可以登录。**部署到公网或团队环境前，请务必通过环境变量设置强密码。**
 
