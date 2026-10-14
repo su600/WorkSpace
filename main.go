@@ -56,6 +56,8 @@ const (
 	mtimeFormat         = "01-02 15:04"
 	searchMaxResults    = 500
 	pinStateFile        = ".workspace_pins.json"
+	uploadDirName       = "文件中转站"
+	maxUploadSize       = 100 << 20 // 100 MiB per uploaded file
 )
 
 // Pin storage — ordered list of pinned relative paths, persisted to disk.
@@ -577,6 +579,7 @@ func main() {
 	mux.HandleFunc("/login", loginHandler)
 	mux.HandleFunc("/pin", pinHandler)
 	mux.HandleFunc("/api/pins", pinsAPIHandler)
+	mux.HandleFunc("/api/upload", uploadAPIHandler)
 	mux.HandleFunc("/search", searchHandler)
 	mux.HandleFunc("/", handler)
 	addr := ":" + cfgPort
@@ -1138,6 +1141,117 @@ func pinsAPIHandler(w http.ResponseWriter, r *http.Request) {
 	pins := append([]string{}, pinnedPaths...)
 	pinMu.RUnlock()
 	writeJSON(w, http.StatusOK, map[string]any{"pins": pins})
+}
+
+// uploadAPIHandler accepts one multipart file field and stores it in the fixed
+// workspace transfer folder. Basic Auth uses the same credentials as portal login.
+func uploadAPIHandler(w http.ResponseWriter, r *http.Request) {
+	if !validateSession(r) && !basicAuthAuthorized(r) {
+		w.Header().Set("WWW-Authenticate", `Basic realm="WorkSpace Upload"`)
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+		return
+	}
+	if r.Method != http.MethodPost {
+		w.Header().Set("Allow", http.MethodPost)
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+		return
+	}
+
+	r.Body = http.MaxBytesReader(w, r.Body, maxUploadSize+(1<<20)) // allow multipart headers
+	mediaType, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
+	if err != nil || mediaType != "multipart/form-data" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Content-Type must be multipart/form-data"})
+		return
+	}
+	reader, err := r.MultipartReader()
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid multipart body"})
+		return
+	}
+	part, err := reader.NextPart()
+	if err != nil || part.FormName() != "file" || part.FileName() == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "exactly one file field named file is required"})
+		return
+	}
+	defer part.Close()
+	name := strings.ReplaceAll(part.FileName(), `\`, "/")
+	name = path.Base(name)
+	if name == "." || name == ".." || name == "/" || name == "" || strings.ContainsAny(name, "\x00\r\n") {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid filename"})
+		return
+	}
+
+	root, err := filepath.EvalSymlinks(cfgDirectory)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "workspace unavailable"})
+		return
+	}
+	dir := filepath.Join(cfgDirectory, uploadDirName)
+	if err := os.MkdirAll(dir, 0750); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "cannot create transfer folder"})
+		return
+	}
+	resolvedDir, err := filepath.EvalSymlinks(dir)
+	if err != nil || !isUnder(resolvedDir, root) || resolvedDir == root {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "transfer folder must stay inside workspace"})
+		return
+	}
+
+	tmp, err := os.CreateTemp(resolvedDir, ".upload-*")
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "cannot create upload file"})
+		return
+	}
+	tmpName := tmp.Name()
+	defer os.Remove(tmpName)
+	written, err := io.Copy(tmp, io.LimitReader(part, maxUploadSize+1))
+	if err != nil {
+		tmp.Close()
+		var maxErr *http.MaxBytesError
+		if errors.As(err, &maxErr) || strings.Contains(strings.ToLower(err.Error()), "request body too large") {
+			writeJSON(w, http.StatusRequestEntityTooLarge, map[string]string{"error": "upload exceeds 100 MiB limit"})
+		} else {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "failed to read uploaded file"})
+		}
+		return
+	}
+	if written > maxUploadSize {
+		tmp.Close()
+		writeJSON(w, http.StatusRequestEntityTooLarge, map[string]string{"error": "upload exceeds 100 MiB limit"})
+		return
+	}
+	if extra, err := reader.NextPart(); err != io.EOF {
+		if extra != nil {
+			extra.Close()
+		}
+		tmp.Close()
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "exactly one file field named file is required"})
+		return
+	}
+	if err := tmp.Close(); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to save uploaded file"})
+		return
+	}
+	target := filepath.Join(resolvedDir, name)
+	if err := os.Link(tmpName, target); err != nil {
+		if errors.Is(err, os.ErrExist) {
+			writeJSON(w, http.StatusConflict, map[string]string{"error": "file already exists"})
+		} else {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to finalize uploaded file"})
+		}
+		return
+	}
+	writeJSON(w, http.StatusCreated, map[string]any{"ok": true, "filename": name, "path": uploadDirName + "/" + name, "size": written})
+}
+
+func basicAuthAuthorized(r *http.Request) bool {
+	username, password, ok := r.BasicAuth()
+	if !ok {
+		return false
+	}
+	userOK := subtle.ConstantTimeCompare([]byte(username), []byte(cfgUsername)) == 1
+	passOK := subtle.ConstantTimeCompare([]byte(password), []byte(cfgPassword)) == 1
+	return userOK && passOK
 }
 
 func pinHandler(w http.ResponseWriter, r *http.Request) {

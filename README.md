@@ -13,6 +13,7 @@
 - 🔍 名称搜索（按文件名与目录名搜索，最多返回 500 条结果）
 - 📌 文件 / 目录收藏（置顶常用路径，持久化保存）
 - 🤖 JSON API：认证后通过 `POST /pin` 的 JSON 请求固定或取消固定文件，供聊天代理 / 自动化调用（详见下文）
+- 📤 文件上传 API：认证后将文件上传到 workspace 下固定的 `文件中转站` 目录
 - 📥 文件下载
 - 🔒 自定义登录页面，基于安全会话 Cookie 认证（默认 24 小时，勾选"记住我"延长至 30 天）
 - 📱 响应式布局，完美适配手机访问
@@ -98,6 +99,24 @@ curl -X POST http://localhost:3000/pin \\
   -H 'Authorization: Bearer <PORTAL_PIN_API_TOKEN>' \\
   -d '{"action":"pin","path":"files/docs/example.md"}'
 ```
+
+## 文件上传 API（手机 / DSH 文件中转）
+
+上传接口会将 workspace 下的 `文件中转站` 目录自动创建好，客户端不能指定其他目标路径。请求使用 `multipart/form-data`，文件字段名为 `file`；认证支持现有登录会话 Cookie，或使用门户当前账号和密码的 HTTP Basic Auth。单文件最大 100 MiB，同名文件不会覆盖，返回 `409 Conflict`。
+
+```bash
+curl --fail-with-body --user '用户名' \\
+  -F 'file=@/本地/文件路径' \\
+  https://workspace.example.com/api/upload
+```
+
+成功时返回 `201` JSON，例如：
+
+```json
+{"ok":true,"filename":"photo.jpg","path":"文件中转站/photo.jpg","size":12345}
+```
+
+Basic Auth 凭据相当于门户登录凭据，请只通过 HTTPS 或本机/可信网络调用，不要将其暴露在公开网络、命令日志或聊天内容中。
 
 ## 环境变量
 
